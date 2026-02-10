@@ -72,19 +72,30 @@ pip install -e .
 ### Scraping
 
 ```bash
+# Quick preview (no file output)
+python -m src.cli preview "data scientist"
+python -m src.cli preview "data scientist" --limit 10
+
 # Scrape jobs for a search query
 python -m src.cli scrape "data scientist"
 python -m src.cli scrape "machine learning" --max-jobs 500
 
 # Scrape multiple queries (deduplicated)
 python -m src.cli scrape-multi "data scientist" "ML engineer" "data engineer"
+python -m src.cli scrape-multi "data scientist" "ML engineer" --name tech_jobs
 
-# Options
+# Options (scrape)
 #   --max-jobs, -n     Limit number of jobs
 #   --output, -o       Output directory (default: data/)
 #   --format, -f       Output format: csv or json
 #   --no-resume        Don't resume from checkpoint
 #   --rate-limit, -r   Requests per second (default: 2.0)
+#   --verbose, -v      Enable debug logging
+
+# Options (scrape-multi)
+#   --max-jobs, -n     Limit number of jobs per query
+#   --output, -o       Output directory (default: data/)
+#   --name             Base name for output file (default: jobs)
 #   --verbose, -v      Enable debug logging
 ```
 
@@ -116,6 +127,8 @@ python -m src.cli scrape-historical --year 2023
 #   --rate-limit, -r        Requests per second (default: 2.0)
 #   --not-found-threshold   Stop after N consecutive missing IDs (default: 1000)
 #   --dry-run               Preview without fetching
+#   --db                    Database path (default: data/mcf_jobs.db)
+#   --verbose, -v           Debug logging
 ```
 
 **Note:** Full historical scrape takes 14-36 days depending on rate limit. Progress is checkpointed every 100 jobs for safe interruption/resume.
@@ -259,9 +272,11 @@ python -m src.cli list --limit 20
 python -m src.cli list --company "Google" --salary-min 8000
 python -m src.cli list --employment-type "Permanent"
 
-# Search by keyword
+# Search by keyword (searches title, description, skills)
 python -m src.cli search "Python"
 python -m src.cli search "machine learning" --limit 50
+python -m src.cli search "React" --field title    # Search title only
+python -m src.cli search "AWS" --field skills     # Search skills only
 
 # Database statistics
 python -m src.cli stats
@@ -269,12 +284,37 @@ python -m src.cli stats
 # Export filtered data
 python -m src.cli export jobs.csv
 python -m src.cli export high_salary.csv --salary-min 10000
+python -m src.cli export python_jobs.csv --keyword "Python" --company Google
 
 # View job change history
 python -m src.cli history <job-uuid>
 
 # Check scrape sessions
 python -m src.cli db-status
+
+# Legacy checkpoint management
+python -m src.cli status              # Show pending checkpoints
+python -m src.cli clear-checkpoints   # Clear all saved checkpoints
+
+# Options (list)
+#   --limit, -n            Number of results (default: 20)
+#   --company, -c          Filter by company name (partial match)
+#   --salary-min           Minimum salary filter
+#   --salary-max           Maximum salary filter
+#   --employment-type, -e  Filter by employment type
+#   --db                   Database path (default: data/mcf_jobs.db)
+
+# Options (search)
+#   --field, -f   Field to search: all, title, or skills (default: all)
+#   --limit, -n   Max results (default: 20)
+#   --db          Database path (default: data/mcf_jobs.db)
+
+# Options (export)
+#   --keyword, -k    Filter by keyword
+#   --company, -c    Filter by company
+#   --salary-min     Minimum salary filter
+#   --salary-max     Maximum salary filter
+#   --db             Database path (default: data/mcf_jobs.db)
 ```
 
 ### Semantic Search
@@ -306,6 +346,28 @@ python -m src.cli search-semantic "data engineer" --json
 #   --alpha               Semantic vs keyword weight (0=keyword, 1=semantic, default: 0.7)
 #   --no-expand           Disable query expansion with skill synonyms
 #   --json                Output as JSON
+#   --db                  Database path (default: data/mcf_jobs.db)
+#   --index-dir           FAISS index directory (default: data/embeddings)
+#   --verbose, -v         Debug logging
+```
+
+### Data Migration
+
+Import legacy MCF data from JSON/CSV files into the SQLite database:
+
+```bash
+python -m src.cli migrate
+python -m src.cli migrate --json-only --dry-run
+python -m src.cli migrate --csv-only --skip-link-only
+
+# Options
+#   --data-dir, -d       Data directory (default: data)
+#   --json-only          Only import JSON files
+#   --csv-only           Only import CSV files
+#   --skip-link-only     Skip link-only CSVs
+#   --dry-run            Preview without importing
+#   --db                 Database path (default: data/mcf_jobs.db)
+#   --verbose, -v        Debug logging
 ```
 
 ### Embeddings
@@ -367,6 +429,28 @@ python -m src.cli api-serve --host 0.0.0.0 --port 9000
 #   --db             Database path
 #   --index-dir      FAISS index directory
 ```
+
+#### Environment Variables
+
+The API server falls back to environment variables when CLI options are not provided:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MCF_DB_PATH` | `data/mcf_jobs.db` | Path to SQLite database |
+| `MCF_INDEX_DIR` | `data/embeddings` | FAISS index directory |
+| `MCF_CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` | Comma-separated CORS origins |
+| `MCF_RATE_LIMIT_RPM` | `100` | Max requests per minute per IP (0 to disable) |
+| `MCF_TRUSTED_PROXIES` | *(empty)* | Comma-separated proxy IPs allowed to set X-Forwarded-For |
+
+#### Middleware
+
+The API applies a middleware stack (outermost to innermost):
+
+1. **Request Logging** — Logs every request with method, path, status code, duration, and client IP
+2. **CORS** — Configurable cross-origin resource sharing (429 responses include CORS headers)
+3. **Rate Limiting** — Sliding-window rate limiter by client IP with automatic stale key eviction
+
+The rate limiter only trusts `X-Forwarded-For` headers from IPs listed in `MCF_TRUSTED_PROXIES`. When no trusted proxies are configured, the header is ignored and the direct connection IP is used.
 
 #### API Endpoints
 
@@ -485,7 +569,14 @@ Jobs are stored in `data/mcf_jobs.db` with the following tables:
 - PID, status, last heartbeat, current position
 
 **`embeddings`** - Vector embeddings for jobs and skills
+- Stores entity_id, entity_type, embedding_blob, and model_version
 - Used by the semantic search engine and FAISS index builder
+
+**`jobs_fts`** - FTS5 virtual table for BM25 full-text search
+- Enables fast keyword matching for hybrid search ranking
+
+**`search_analytics`** - Query logging for monitoring
+- Tracks queries, result counts, and latency for the analytics endpoints
 
 ### Output Schema
 
@@ -517,9 +608,10 @@ Jobs are stored in `data/mcf_jobs.db` with the following tables:
 ```
 src/
 ├── api/                          # FastAPI REST API
-│   ├── app.py                    # Route definitions + app factory
+│   ├── __init__.py               # Package init (does not export app)
+│   ├── app.py                    # Application factory, routes, lifespan
 │   ├── models.py                 # Request/response Pydantic models
-│   └── middleware.py             # Rate limiting, request logging
+│   └── middleware.py             # Rate limiting, request logging, proxy trust
 ├── mcf/                          # Core scraper + search package
 │   ├── api_client.py             # Async HTTP client with retry
 │   ├── database.py               # SQLite operations
@@ -530,6 +622,7 @@ src/
 │   ├── batch_logger.py           # Per-ID attempt logging (batched)
 │   ├── adaptive_rate.py          # Dynamic rate limiting
 │   ├── daemon.py                 # Background process manager
+│   ├── migration.py              # Legacy JSON/CSV import to SQLite
 │   └── embeddings/               # Semantic search engine
 │       ├── search_engine.py      # Hybrid BM25 + FAISS orchestrator
 │       ├── index_manager.py      # FAISS index build/load/save
