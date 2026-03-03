@@ -2,19 +2,20 @@
 Scraper daemon for long-running background operation.
 
 Provides a simple daemon process manager with:
-- Background process execution via fork
+- Background process execution via subprocess
 - Heartbeat-based wake detection (detects sleep/resume)
 - PID file management
 - Status monitoring
 
-Note: This module uses Unix-specific features (os.fork, os.setsid)
-and will only work on Unix-like systems (Linux, macOS).
+Uses subprocess.Popen (fork+exec) instead of bare os.fork() to avoid
+macOS ObjC runtime crashes in the child process.
 """
 
 import asyncio
 import logging
 import os
 import signal
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -123,17 +124,22 @@ class ScraperDaemon:
 
     def start(
         self,
-        scraper_func: Callable[..., Awaitable[Any]],
-        *args,
-        **kwargs,
+        year: int | None = None,
+        all_years: bool = False,
+        rate_limit: float = 2.0,
+        db_path: str = "data/mcf_jobs.db",
     ) -> int:
         """
-        Fork and run scraper in background.
+        Spawn a subprocess to run the scraper in the background.
+
+        Uses subprocess.Popen instead of os.fork() to avoid macOS
+        ObjC runtime crash (fork-without-exec is unsafe on macOS).
 
         Args:
-            scraper_func: Async function to run (e.g., scraper.scrape_year)
-            *args: Positional arguments for scraper_func
-            **kwargs: Keyword arguments for scraper_func
+            year: Specific year to scrape, or None if all_years
+            all_years: If True, scrape all years (2019-2026)
+            rate_limit: Requests per second
+            db_path: Path to SQLite database
 
         Returns:
             PID of the daemon process
@@ -145,48 +151,49 @@ class ScraperDaemon:
             pid = self.get_pid()
             raise DaemonAlreadyRunning(f"Daemon already running with PID {pid}")
 
-        # First fork
-        try:
-            pid = os.fork()
-        except OSError as e:
-            raise DaemonError(f"First fork failed: {e}")
+        # Build command for the worker subprocess
+        cmd = [
+            sys.executable, "-m", "src.cli", "_daemon-worker",
+            "--db", db_path,
+            "--rate-limit", str(rate_limit),
+            "--pidfile", str(self.pidfile),
+            "--logfile", str(self.logfile),
+            "--heartbeat-interval", str(self.heartbeat_interval),
+            "--wake-threshold", str(self.wake_threshold),
+        ]
+        if year is not None:
+            cmd.extend(["--year", str(year)])
+        elif all_years:
+            cmd.append("--all")
 
-        if pid > 0:
-            # Parent process: wait briefly for child to start
-            time.sleep(0.1)
-            # Read PID from file (child writes it)
-            child_pid = self.get_pid()
-            if child_pid:
-                return child_pid
-            return pid
+        # Open log file for subprocess stdout/stderr
+        log_fd = open(self.logfile, 'a')
 
-        # Child process: become session leader
-        os.setsid()
+        # Launch subprocess in new session (detached from terminal)
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=log_fd,
+            stderr=log_fd,
+            start_new_session=True,
+        )
+        log_fd.close()
 
-        # Second fork (prevent acquiring terminal)
-        try:
-            pid = os.fork()
-        except OSError as e:
-            sys.exit(1)
+        # Write PID file immediately from parent
+        self.pidfile.write_text(str(proc.pid))
 
-        if pid > 0:
-            # First child exits
-            sys.exit(0)
+        return proc.pid
 
-        # Grandchild: actual daemon process
-        self._run_daemon(scraper_func, *args, **kwargs)
-        sys.exit(0)
-
-    def _run_daemon(
+    def run_worker(
         self,
         scraper_func: Callable[..., Awaitable[Any]],
-        *args,
-        **kwargs,
     ) -> None:
-        """Run the daemon process (called after forking)."""
-        # Write PID file
-        self.pidfile.write_text(str(os.getpid()))
+        """
+        Run the scraper as a daemon worker (called from subprocess).
 
+        This method is intended to be called from the _daemon-worker CLI
+        command, which runs in a separate process spawned by start().
+        """
         # Set up logging to file
         file_handler = logging.FileHandler(self.logfile)
         file_handler.setFormatter(
@@ -195,14 +202,7 @@ class ScraperDaemon:
         logging.root.addHandler(file_handler)
         logging.root.setLevel(logging.INFO)
 
-        # Redirect stdout/stderr to log file
-        sys.stdout = open(self.logfile, 'a')
-        sys.stderr = sys.stdout
-
-        # Close inherited file descriptors
-        os.close(0)  # stdin
-
-        logger.info(f"Daemon started with PID {os.getpid()}")
+        logger.info(f"Daemon worker started with PID {os.getpid()}")
 
         # Update database state
         self.db.update_daemon_state(os.getpid(), 'running')
@@ -213,7 +213,7 @@ class ScraperDaemon:
 
         # Run the scraper with heartbeat
         try:
-            asyncio.run(self._run_with_heartbeat(scraper_func, *args, **kwargs))
+            asyncio.run(self._run_with_heartbeat(scraper_func))
         except Exception as e:
             logger.exception(f"Daemon error: {e}")
         finally:
@@ -222,8 +222,6 @@ class ScraperDaemon:
     async def _run_with_heartbeat(
         self,
         scraper_func: Callable[..., Awaitable[Any]],
-        *args,
-        **kwargs,
     ) -> Any:
         """Run scraper function with concurrent heartbeat task."""
         last_beat = time.time()
@@ -257,7 +255,7 @@ class ScraperDaemon:
 
         try:
             # Run the scraper
-            result = await scraper_func(*args, **kwargs)
+            result = await scraper_func()
             return result
         finally:
             # Stop heartbeat

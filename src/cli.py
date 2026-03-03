@@ -32,6 +32,8 @@ from src.mcf import (
     ScraperDaemon,
     DaemonAlreadyRunning,
     DaemonNotRunning,
+    DEFAULT_HEARTBEAT_INTERVAL,
+    DEFAULT_WAKE_THRESHOLD,
     EmbeddingGenerator,
     EmbeddingStats,
 )
@@ -1058,18 +1060,12 @@ def daemon_cmd(
             console.print(f"Database: {db_path}")
             console.print()
 
-            # Define the scraper function to run in daemon
-            async def run_scraper():
-                async with HistoricalScraper(
-                    db_path=db_path,
-                    requests_per_second=rate_limit,
-                ) as scraper:
-                    if year:
-                        return await scraper.scrape_year(year, resume=True)
-                    else:
-                        return await scraper.scrape_all_years(resume=True)
-
-            pid = daemon.start(run_scraper)
+            pid = daemon.start(
+                year=year,
+                all_years=all_years,
+                rate_limit=rate_limit,
+                db_path=db_path,
+            )
             console.print(f"[green]Daemon started with PID {pid}[/green]")
             console.print(f"\nLogs: [cyan]{daemon.logfile}[/cyan]")
             console.print("\nCheck status: [bold]mcf daemon status[/bold]")
@@ -1092,6 +1088,40 @@ def daemon_cmd(
         console.print(f"[red]Unknown action: {action}[/red]")
         console.print("Valid actions: start, stop, status")
         raise typer.Exit(1)
+
+
+@app.command(name="_daemon-worker", hidden=True)
+def daemon_worker(
+    year: Optional[int] = typer.Option(None, "--year", "-y"),
+    all_years: bool = typer.Option(False, "--all"),
+    rate_limit: float = typer.Option(2.0, "--rate-limit", "-r"),
+    db_path: str = typer.Option("data/mcf_jobs.db", "--db"),
+    pidfile: str = typer.Option("data/.scraper.pid", "--pidfile"),
+    logfile: str = typer.Option("data/scraper_daemon.log", "--logfile"),
+    heartbeat_interval: int = typer.Option(DEFAULT_HEARTBEAT_INTERVAL, "--heartbeat-interval"),
+    wake_threshold: int = typer.Option(DEFAULT_WAKE_THRESHOLD, "--wake-threshold"),
+) -> None:
+    """Internal: daemon worker process. Do not call directly."""
+    db = MCFDatabase(db_path)
+    daemon = ScraperDaemon(
+        db,
+        pidfile=pidfile,
+        logfile=logfile,
+        heartbeat_interval=heartbeat_interval,
+        wake_threshold=wake_threshold,
+    )
+
+    async def run_scraper():
+        async with HistoricalScraper(
+            db_path=db_path,
+            requests_per_second=rate_limit,
+        ) as scraper:
+            if year:
+                return await scraper.scrape_year(year, resume=True)
+            else:
+                return await scraper.scrape_all_years(resume=True)
+
+    daemon.run_worker(run_scraper)
 
 
 # Gap analysis commands

@@ -24,7 +24,14 @@ from .migration import MCFMigrator, MigrationStats, LegacyJobParser
 from .historical_scraper import HistoricalScraper, ScrapeProgress, YEAR_ESTIMATES
 from .batch_logger import BatchLogger
 from .adaptive_rate import AdaptiveRateLimiter, RateState
-from .daemon import ScraperDaemon, DaemonError, DaemonAlreadyRunning, DaemonNotRunning
+from .daemon import (
+    ScraperDaemon,
+    DaemonError,
+    DaemonAlreadyRunning,
+    DaemonNotRunning,
+    DEFAULT_HEARTBEAT_INTERVAL,
+    DEFAULT_WAKE_THRESHOLD,
+)
 from .embeddings import EmbeddingGenerator, EmbeddingStats, SkillClusterResult
 
 __all__ = [
