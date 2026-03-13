@@ -64,6 +64,26 @@ Use the app as a guided demo for recruiter and talent-intelligence workflows:
 - `Match Lab` answers: How well does this profile fit the current market, and which skills are missing?
 - `Search & Similarity` answers: Why did the retriever rank this role highly, and which related skills live in the same semantic neighborhood?
 
+## Product Tour
+
+The screenshots below use demo fixture data so the product story is visible even before you run a fresh scrape or embedding build locally.
+
+### Overview
+
+![Overview dashboard](output/playwright/overview-dashboard.png)
+
+### Trends Explorer
+
+![Trends Explorer](output/playwright/trends-explorer.png)
+
+### Match Lab
+
+![Match Lab](output/playwright/match-lab-results.png)
+
+### Search & Similarity
+
+![Search and Similarity](output/playwright/search-similarity.png)
+
 ## Installation
 
 Requires Python 3.10+
