@@ -29,20 +29,34 @@ from .middleware import RateLimitMiddleware, RequestLoggingMiddleware
 from .models import (
     CompanySimilarity,
     CompanySimilarityRequest,
+    CompanyTrendResponse,
     ErrorResponse,
     HealthResponse,
+    InsightCard,
     JobResult,
+    MomentumCard,
+    MonthlySkillSnapshot,
+    OverviewMetric,
+    OverviewResponse,
+    ProfileMatchRequest,
+    ProfileMatchResponse,
     RelatedSkill,
     RelatedSkillsResponse,
+    RoleTrendRequest,
+    RoleTrendResponse,
     SearchRequest,
     SearchResponse,
+    SalaryMovement,
     SimilarBatchRequest,
     SimilarBatchResponse,
     SimilarJobsRequest,
+    SkillTrendRequest,
+    SkillTrendSeries,
     SkillCloudItem,
     SkillCloudResponse,
     SkillSearchRequest,
     StatsResponse,
+    TrendPoint,
 )
 from ..mcf.embeddings import SemanticSearchEngine
 from ..mcf.embeddings.models import SimilarJobsRequest as InternalSimilarJobsRequest
@@ -335,6 +349,137 @@ def _register_routes(app: FastAPI) -> None:
             None, engine.find_similar_companies, internal_req
         )
         return [CompanySimilarity.from_internal(r) for r in internal_results]
+
+    # -- Market intelligence endpoints ----------------------------------------
+
+    @app.get("/api/overview", response_model=OverviewResponse)
+    async def get_overview(
+        months: int = Query(12, ge=3, le=24, description="Number of months to summarize"),
+        engine: SemanticSearchEngine = Depends(get_engine),
+    ) -> OverviewResponse:
+        """Get summary cards and top movers for the overview page."""
+        loop = asyncio.get_running_loop()
+        raw = await loop.run_in_executor(
+            None, partial(engine.db.get_overview, months=months)
+        )
+        return OverviewResponse(
+            headline_metrics=OverviewMetric(**raw["headline_metrics"]),
+            rising_skills=[MomentumCard(**item) for item in raw["rising_skills"]],
+            rising_companies=[MomentumCard(**item) for item in raw["rising_companies"]],
+            salary_movement=SalaryMovement(**raw["salary_movement"]),
+            market_insights=[InsightCard(**item) for item in raw["market_insights"]],
+        )
+
+    @app.post("/api/trends/skills", response_model=list[SkillTrendSeries])
+    async def skill_trends(
+        request: SkillTrendRequest,
+        engine: SemanticSearchEngine = Depends(get_engine),
+    ) -> list[SkillTrendSeries]:
+        """Compare monthly demand trends for up to three skills."""
+        loop = asyncio.get_running_loop()
+        raw = await loop.run_in_executor(
+            None,
+            partial(
+                engine.db.get_skill_trends,
+                skills=request.skills,
+                months=request.months,
+                company_name=request.company,
+                employment_type=request.employment_type,
+                region=request.region,
+            ),
+        )
+        return [
+            SkillTrendSeries(
+                skill=item["skill"],
+                series=[TrendPoint(**point) for point in item["series"]],
+                latest=TrendPoint(**item["latest"]) if item.get("latest") else None,
+            )
+            for item in raw
+        ]
+
+    @app.post("/api/trends/roles", response_model=RoleTrendResponse)
+    async def role_trends(
+        request: RoleTrendRequest,
+        engine: SemanticSearchEngine = Depends(get_engine),
+    ) -> RoleTrendResponse:
+        """Get monthly trend data for a role/query string."""
+        loop = asyncio.get_running_loop()
+        raw = await loop.run_in_executor(
+            None,
+            partial(
+                engine.db.get_role_trend,
+                query=request.query,
+                months=request.months,
+                company_name=request.company,
+                employment_type=request.employment_type,
+                region=request.region,
+            ),
+        )
+        return RoleTrendResponse(
+            query=raw["query"],
+            series=[TrendPoint(**point) for point in raw["series"]],
+            latest=TrendPoint(**raw["latest"]) if raw.get("latest") else None,
+        )
+
+    @app.get("/api/trends/companies/{company_name}", response_model=CompanyTrendResponse)
+    async def company_trends(
+        company_name: str,
+        months: int = Query(12, ge=3, le=24, description="Number of months to analyze"),
+        engine: SemanticSearchEngine = Depends(get_engine),
+    ) -> CompanyTrendResponse:
+        """Get hiring trend, skill mix, and similar employers for one company."""
+        loop = asyncio.get_running_loop()
+        trend_raw, similar_raw = await asyncio.gather(
+            loop.run_in_executor(
+                None, partial(engine.db.get_company_trend, company_name=company_name, months=months)
+            ),
+            loop.run_in_executor(
+                None,
+                partial(
+                    engine.find_similar_companies,
+                    CompanySimilarityRequest(company_name=company_name, limit=6).to_internal(),
+                ),
+            ),
+        )
+        return CompanyTrendResponse(
+            company_name=trend_raw["company_name"],
+            series=[TrendPoint(**point) for point in trend_raw["series"]],
+            top_skills_by_month=[
+                MonthlySkillSnapshot(
+                    month=item["month"],
+                    skills=[SkillCloudItem(**skill) for skill in item["skills"]],
+                )
+                for item in trend_raw["top_skills_by_month"]
+            ],
+            similar_companies=[CompanySimilarity.from_internal(item) for item in similar_raw],
+        )
+
+    @app.post("/api/match/profile", response_model=ProfileMatchResponse)
+    async def profile_match(
+        request: ProfileMatchRequest,
+        engine: SemanticSearchEngine = Depends(get_engine),
+    ) -> ProfileMatchResponse:
+        """Match a pasted candidate profile or resume text to jobs."""
+        loop = asyncio.get_running_loop()
+        raw = await loop.run_in_executor(
+            None,
+            partial(
+                engine.match_profile,
+                profile_text=request.profile_text,
+                target_titles=request.target_titles,
+                salary_expectation_annual=request.salary_expectation_annual,
+                employment_type=request.employment_type,
+                region=request.region,
+                limit=request.limit,
+            ),
+        )
+        return ProfileMatchResponse(
+            results=[JobResult.from_internal(item) for item in raw["results"]],
+            extracted_skills=raw["extracted_skills"],
+            total_candidates=raw["total_candidates"],
+            search_time_ms=raw["search_time_ms"],
+            degraded=raw["degraded"],
+        )
 
     # -- Utility endpoints ----------------------------------------------------
 

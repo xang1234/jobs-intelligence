@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "mcf-scraper"
+name = "mcf-intelligence-platform"
 version = "1.0.0"
-description = "API-based job scraper for MyCareersFuture.sg"
+description = "Hiring-market intelligence, explainable NLP search, and profile matching for MyCareersFuture.sg"
 authors = ["Your Name <your.email@example.com>"]
 package-mode = false
 

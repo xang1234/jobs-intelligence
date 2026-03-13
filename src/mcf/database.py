@@ -16,7 +16,7 @@ import logging
 import sqlite3
 from collections import Counter
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Optional, Iterator, Any
 
@@ -1836,6 +1836,437 @@ class MCFDatabase:
             "cache_hit_rate": (total_cache_hits / total * 100) if total > 0 else 0,
             "degraded_rate": (total_degraded / total * 100) if total > 0 else 0,
             "by_type": by_type,
+        }
+
+    # =========================================================================
+    # Market Intelligence Methods
+    # =========================================================================
+
+    @staticmethod
+    def _subtract_months(base: date, months_back: int) -> date:
+        """Return the first day of the month `months_back` months before `base`."""
+        year = base.year
+        month = base.month - months_back
+        while month <= 0:
+            month += 12
+            year -= 1
+        return date(year, month, 1)
+
+    @classmethod
+    def _month_labels(cls, months: int) -> list[str]:
+        """Generate YYYY-MM labels from oldest to newest."""
+        start = date.today().replace(day=1)
+        labels = []
+        for offset in range(months - 1, -1, -1):
+            labels.append(cls._subtract_months(start, offset).strftime("%Y-%m"))
+        return labels
+
+    @staticmethod
+    def _median(values: list[int]) -> Optional[int]:
+        """Compute an integer median for a small salary sample."""
+        if not values:
+            return None
+        ordered = sorted(values)
+        mid = len(ordered) // 2
+        if len(ordered) % 2 == 1:
+            return ordered[mid]
+        return int((ordered[mid - 1] + ordered[mid]) / 2)
+
+    @staticmethod
+    def _salary_midpoint(row: sqlite3.Row | dict) -> Optional[int]:
+        """Convert annual salary bounds into a single comparable salary figure."""
+        annual_min = row["salary_annual_min"]
+        annual_max = row["salary_annual_max"]
+        if annual_min is not None and annual_max is not None:
+            return int((annual_min + annual_max) / 2)
+        if annual_min is not None:
+            return int(annual_min)
+        if annual_max is not None:
+            return int(annual_max)
+        return None
+
+    @staticmethod
+    def _annotate_momentum(series: list[dict]) -> None:
+        """
+        Compute month-over-trailing-3-month-average momentum in percent.
+
+        When there is no previous volume baseline, treat a non-zero current value
+        as a new emergence with +100 momentum.
+        """
+        for idx, point in enumerate(series):
+            history = [series[j]["job_count"] for j in range(max(0, idx - 3), idx)]
+            if not history:
+                point["momentum"] = 0.0
+                continue
+
+            baseline = sum(history) / len(history)
+            current = point["job_count"]
+
+            if baseline == 0:
+                point["momentum"] = 100.0 if current > 0 else 0.0
+            else:
+                point["momentum"] = round(((current - baseline) / baseline) * 100, 2)
+
+    @staticmethod
+    def _build_filter_conditions(
+        company_name: str | None = None,
+        employment_type: str | None = None,
+        region: str | None = None,
+        keyword: str | None = None,
+        company_exact: bool = False,
+    ) -> tuple[list[str], list[Any]]:
+        """Build reusable WHERE conditions for trend/overview queries."""
+        conditions: list[str] = []
+        params: list[Any] = []
+
+        if company_name:
+            if company_exact:
+                conditions.append("LOWER(company_name) = LOWER(?)")
+                params.append(company_name)
+            else:
+                conditions.append("LOWER(company_name) LIKE LOWER(?)")
+                params.append(f"%{company_name}%")
+
+        if employment_type:
+            conditions.append("employment_type = ?")
+            params.append(employment_type)
+
+        if region:
+            conditions.append("region = ?")
+            params.append(region)
+
+        if keyword:
+            conditions.append(
+                "(LOWER(title) LIKE LOWER(?) OR LOWER(description) LIKE LOWER(?) OR LOWER(skills) LIKE LOWER(?))"
+            )
+            like_pattern = f"%{keyword}%"
+            params.extend([like_pattern, like_pattern, like_pattern])
+
+        return conditions, params
+
+    def _fetch_trend_rows(
+        self,
+        months: int,
+        company_name: str | None = None,
+        employment_type: str | None = None,
+        region: str | None = None,
+        keyword: str | None = None,
+        company_exact: bool = False,
+        skill: str | None = None,
+    ) -> list[sqlite3.Row]:
+        """Fetch minimally shaped rows for time-series aggregation."""
+        start_month = self._subtract_months(date.today().replace(day=1), months - 1)
+        conditions = ["posted_date IS NOT NULL", "posted_date >= ?"]
+        params: list[Any] = [start_month.isoformat()]
+
+        extra_conditions, extra_params = self._build_filter_conditions(
+            company_name=company_name,
+            employment_type=employment_type,
+            region=region,
+            keyword=keyword,
+            company_exact=company_exact,
+        )
+        conditions.extend(extra_conditions)
+        params.extend(extra_params)
+
+        if skill:
+            conditions.append("LOWER(skills) LIKE LOWER(?)")
+            params.append(f"%{skill}%")
+
+        where_clause = " AND ".join(conditions)
+
+        with self._connection() as conn:
+            return conn.execute(
+                f"""
+                SELECT posted_date, salary_annual_min, salary_annual_max, company_name, skills
+                FROM jobs
+                WHERE {where_clause}
+                ORDER BY posted_date ASC
+                """,
+                params,
+            ).fetchall()
+
+    def _get_market_monthly_counts(
+        self,
+        months: int,
+        company_name: str | None = None,
+        employment_type: str | None = None,
+        region: str | None = None,
+    ) -> dict[str, int]:
+        """Get baseline monthly job counts for market share calculations."""
+        rows = self._fetch_trend_rows(
+            months=months,
+            company_name=company_name,
+            employment_type=employment_type,
+            region=region,
+        )
+        counts = {label: 0 for label in self._month_labels(months)}
+        for row in rows:
+            month = row["posted_date"][:7]
+            if month in counts:
+                counts[month] += 1
+        return counts
+
+    def _rows_to_series(
+        self,
+        rows: list[sqlite3.Row],
+        months: int,
+        market_counts: Optional[dict[str, int]] = None,
+    ) -> list[dict]:
+        """Convert raw rows into a dense monthly trend series."""
+        labels = self._month_labels(months)
+        points = {
+            label: {
+                "month": label,
+                "job_count": 0,
+                "market_share": 0.0,
+                "median_salary_annual": None,
+                "momentum": 0.0,
+            }
+            for label in labels
+        }
+        salary_buckets: dict[str, list[int]] = {label: [] for label in labels}
+
+        for row in rows:
+            month = row["posted_date"][:7]
+            if month not in points:
+                continue
+            points[month]["job_count"] += 1
+            salary = self._salary_midpoint(row)
+            if salary is not None:
+                salary_buckets[month].append(salary)
+
+        for label in labels:
+            points[label]["median_salary_annual"] = self._median(salary_buckets[label])
+            market_total = (market_counts or {}).get(label, 0)
+            if market_total > 0:
+                points[label]["market_share"] = round(
+                    (points[label]["job_count"] / market_total) * 100, 2
+                )
+
+        series = [points[label] for label in labels]
+        self._annotate_momentum(series)
+        return series
+
+    def get_skill_trends(
+        self,
+        skills: list[str],
+        months: int = 12,
+        company_name: str | None = None,
+        employment_type: str | None = None,
+        region: str | None = None,
+    ) -> list[dict]:
+        """Return monthly trend series for each requested skill."""
+        market_counts = self._get_market_monthly_counts(
+            months=months,
+            company_name=company_name,
+            employment_type=employment_type,
+            region=region,
+        )
+        trends = []
+        for skill in skills:
+            rows = self._fetch_trend_rows(
+                months=months,
+                company_name=company_name,
+                employment_type=employment_type,
+                region=region,
+                skill=skill,
+            )
+            series = self._rows_to_series(rows, months, market_counts)
+            trends.append(
+                {
+                    "skill": skill,
+                    "series": series,
+                    "latest": series[-1] if series else None,
+                }
+            )
+        return trends
+
+    def get_role_trend(
+        self,
+        query: str,
+        months: int = 12,
+        company_name: str | None = None,
+        employment_type: str | None = None,
+        region: str | None = None,
+    ) -> dict:
+        """Return monthly trend data for a role/query string."""
+        rows = self._fetch_trend_rows(
+            months=months,
+            company_name=company_name,
+            employment_type=employment_type,
+            region=region,
+            keyword=query,
+        )
+        market_counts = self._get_market_monthly_counts(
+            months=months,
+            company_name=company_name,
+            employment_type=employment_type,
+            region=region,
+        )
+        series = self._rows_to_series(rows, months, market_counts)
+        return {
+            "query": query,
+            "series": series,
+            "latest": series[-1] if series else None,
+        }
+
+    def get_company_trend(self, company_name: str, months: int = 12) -> dict:
+        """Return hiring trend and skill mix for a single company."""
+        rows = self._fetch_trend_rows(
+            months=months,
+            company_name=company_name,
+            company_exact=True,
+        )
+        market_counts = self._get_market_monthly_counts(months=months)
+        series = self._rows_to_series(rows, months, market_counts)
+
+        skills_by_month: dict[str, Counter] = {
+            label: Counter() for label in self._month_labels(months)
+        }
+        for row in rows:
+            month = row["posted_date"][:7]
+            raw_skills = row["skills"] or ""
+            for skill in [item.strip() for item in raw_skills.split(",") if item.strip()]:
+                skills_by_month[month][skill] += 1
+
+        top_skills_by_month = [
+            {
+                "month": month,
+                "skills": [
+                    {"skill": skill, "job_count": count}
+                    for skill, count in counter.most_common(5)
+                ],
+            }
+            for month, counter in skills_by_month.items()
+        ]
+
+        return {
+            "company_name": company_name,
+            "series": series,
+            "top_skills_by_month": top_skills_by_month,
+        }
+
+    def get_overview(self, months: int = 12) -> dict:
+        """Return summary cards and top movers for the homepage overview."""
+        current_month = date.today().replace(day=1).strftime("%Y-%m")
+        previous_month = self._subtract_months(date.today().replace(day=1), 1).strftime("%Y-%m")
+        labels = self._month_labels(months)
+        start_month = labels[0] + "-01"
+
+        with self._connection() as conn:
+            totals = conn.execute(
+                """
+                SELECT
+                    COUNT(*) as total_jobs,
+                    COUNT(DISTINCT company_name) as unique_companies,
+                    AVG((COALESCE(salary_annual_min, salary_annual_max) + COALESCE(salary_annual_max, salary_annual_min)) / 2.0) as avg_salary
+                FROM jobs
+                WHERE posted_date IS NOT NULL AND posted_date >= ?
+                """,
+                (start_month,),
+            ).fetchone()
+
+            current_jobs = conn.execute(
+                """
+                SELECT COUNT(*) FROM jobs
+                WHERE posted_date IS NOT NULL AND strftime('%Y-%m', posted_date) = ?
+                """,
+                (current_month,),
+            ).fetchone()[0]
+
+            previous_jobs = conn.execute(
+                """
+                SELECT COUNT(*) FROM jobs
+                WHERE posted_date IS NOT NULL AND strftime('%Y-%m', posted_date) = ?
+                """,
+                (previous_month,),
+            ).fetchone()[0]
+
+            top_companies_rows = conn.execute(
+                """
+                SELECT company_name, COUNT(*) as job_count
+                FROM jobs
+                WHERE posted_date IS NOT NULL
+                  AND posted_date >= ?
+                  AND company_name IS NOT NULL
+                  AND company_name != ''
+                GROUP BY company_name
+                ORDER BY job_count DESC
+                LIMIT 20
+                """,
+                (start_month,),
+            ).fetchall()
+
+        all_skills = self.get_skill_frequencies(min_jobs=10, limit=30)
+        skill_trends = self.get_skill_trends([skill for skill, _ in all_skills[:15]], months=months)
+        rising_skills = sorted(
+            [
+                {
+                    "name": item["skill"],
+                    "job_count": item["latest"]["job_count"] if item["latest"] else 0,
+                    "momentum": item["latest"]["momentum"] if item["latest"] else 0.0,
+                    "median_salary_annual": item["latest"]["median_salary_annual"] if item["latest"] else None,
+                }
+                for item in skill_trends
+            ],
+            key=lambda item: (item["momentum"], item["job_count"]),
+            reverse=True,
+        )[:8]
+
+        company_trends = [self.get_company_trend(row["company_name"], months=months) for row in top_companies_rows]
+        rising_companies = sorted(
+            [
+                {
+                    "name": item["company_name"],
+                    "job_count": item["series"][-1]["job_count"] if item["series"] else 0,
+                    "momentum": item["series"][-1]["momentum"] if item["series"] else 0.0,
+                    "median_salary_annual": item["series"][-1]["median_salary_annual"] if item["series"] else None,
+                }
+                for item in company_trends
+            ],
+            key=lambda item: (item["momentum"], item["job_count"]),
+            reverse=True,
+        )[:8]
+
+        market_series = self._rows_to_series(self._fetch_trend_rows(months=months), months=months)
+        current_salary = market_series[-1]["median_salary_annual"] if market_series else None
+        previous_salary = market_series[-2]["median_salary_annual"] if len(market_series) > 1 else None
+        salary_change_pct = 0.0
+        if current_salary and previous_salary:
+            salary_change_pct = round(((current_salary - previous_salary) / previous_salary) * 100, 2)
+
+        insights = [
+            {
+                "label": "Monthly hiring velocity",
+                "value": current_jobs,
+                "delta": round(
+                    ((current_jobs - previous_jobs) / previous_jobs) * 100, 2
+                ) if previous_jobs else (100.0 if current_jobs else 0.0),
+            },
+            {
+                "label": "Average annual salary",
+                "value": int(totals["avg_salary"]) if totals["avg_salary"] else None,
+                "delta": salary_change_pct,
+            },
+        ]
+
+        return {
+            "headline_metrics": {
+                "total_jobs": totals["total_jobs"],
+                "current_month_jobs": current_jobs,
+                "unique_companies": totals["unique_companies"],
+                "unique_skills": len(self.get_all_unique_skills()),
+                "avg_salary_annual": int(totals["avg_salary"]) if totals["avg_salary"] else None,
+            },
+            "rising_skills": rising_skills,
+            "rising_companies": rising_companies,
+            "salary_movement": {
+                "current_median_salary_annual": current_salary,
+                "previous_median_salary_annual": previous_salary,
+                "change_pct": salary_change_pct,
+            },
+            "market_insights": insights,
         }
 
     # =========================================================================

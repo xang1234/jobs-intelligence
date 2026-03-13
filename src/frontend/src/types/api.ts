@@ -1,150 +1,265 @@
 // =============================================================================
-// Request Types
+// Shared Request Types
 // =============================================================================
 
+export interface Filters {
+  salary_min: number | null
+  salary_max: number | null
+  employment_type: string | null
+  company: string | null
+}
+
+export interface TrendFilters {
+  company?: string | null
+  employment_type?: string | null
+  region?: string | null
+}
+
 export interface SearchRequest {
-  query: string;
-  limit?: number;
-  salary_min?: number | null;
-  salary_max?: number | null;
-  employment_type?: string | null;
-  region?: string | null;
-  company?: string | null;
-  alpha?: number;
-  freshness_weight?: number;
-  expand_query?: boolean;
-  min_similarity?: number;
+  query: string
+  limit?: number
+  salary_min?: number | null
+  salary_max?: number | null
+  employment_type?: string | null
+  region?: string | null
+  company?: string | null
+  alpha?: number
+  freshness_weight?: number
+  expand_query?: boolean
+  min_similarity?: number
 }
 
 export interface SimilarJobsRequest {
-  job_uuid: string;
-  limit?: number;
-  exclude_same_company?: boolean;
-  freshness_weight?: number;
+  job_uuid: string
+  limit?: number
+  exclude_same_company?: boolean
+  freshness_weight?: number
 }
 
 export interface SimilarBatchRequest {
-  job_uuids: string[];
-  limit_per_job?: number;
-  exclude_same_company?: boolean;
+  job_uuids: string[]
+  limit_per_job?: number
+  exclude_same_company?: boolean
 }
 
 export interface SkillSearchRequest {
-  skill: string;
-  limit?: number;
-  salary_min?: number | null;
-  salary_max?: number | null;
-  employment_type?: string | null;
+  skill: string
+  limit?: number
+  salary_min?: number | null
+  salary_max?: number | null
+  employment_type?: string | null
 }
 
 export interface CompanySimilarityRequest {
-  company_name: string;
-  limit?: number;
+  company_name: string
+  limit?: number
+}
+
+export interface SkillTrendRequest extends TrendFilters {
+  skills: string[]
+  months?: number
+}
+
+export interface RoleTrendRequest extends TrendFilters {
+  query: string
+  months?: number
+}
+
+export interface ProfileMatchRequest {
+  profile_text: string
+  target_titles?: string[]
+  salary_expectation_annual?: number | null
+  employment_type?: string | null
+  region?: string | null
+  limit?: number
 }
 
 // =============================================================================
 // Response Types
 // =============================================================================
 
+export interface MatchExplanation {
+  semantic_score: number | null
+  bm25_score: number | null
+  freshness_score: number | null
+  matched_skills: string[]
+  missing_skills: string[]
+  query_terms: string[]
+  skill_overlap_score: number | null
+  seniority_fit: number | null
+  salary_fit: number | null
+  overall_fit: number | null
+}
+
 export interface JobResult {
-  uuid: string;
-  title: string;
-  company_name: string | null;
-  description: string;
-  salary_min: number | null;
-  salary_max: number | null;
-  employment_type: string | null;
-  skills: string | null;
-  location: string | null;
-  posted_date: string | null;
-  job_url: string | null;
-  similarity_score: number;
-  bm25_score: number | null;
-  freshness_score: number | null;
+  uuid: string
+  title: string
+  company_name: string | null
+  description: string
+  salary_min: number | null
+  salary_max: number | null
+  employment_type: string | null
+  seniority: string | null
+  skills: string | null
+  location: string | null
+  posted_date: string | null
+  job_url: string | null
+  similarity_score: number
+  semantic_score: number | null
+  bm25_score: number | null
+  freshness_score: number | null
+  matched_skills: string[]
+  missing_skills: string[]
+  explanations: MatchExplanation | null
 }
 
 export interface SearchResponse {
-  results: JobResult[];
-  total_candidates: number;
-  search_time_ms: number;
-  query_expansion: string[] | null;
-  degraded: boolean;
-  cache_hit: boolean;
+  results: JobResult[]
+  total_candidates: number
+  search_time_ms: number
+  query_expansion: string[] | null
+  degraded: boolean
+  cache_hit: boolean
 }
 
 export interface SimilarBatchResponse {
-  results: Record<string, JobResult[]>;
-  search_time_ms: number;
+  results: Record<string, JobResult[]>
+  search_time_ms: number
 }
 
 export interface SkillCloudItem {
-  skill: string;
-  job_count: number;
-  cluster_id: number | null;
+  skill: string
+  job_count: number
+  cluster_id: number | null
 }
 
 export interface SkillCloudResponse {
-  items: SkillCloudItem[];
-  total_unique_skills: number;
+  items: SkillCloudItem[]
+  total_unique_skills: number
 }
 
 export interface RelatedSkill {
-  skill: string;
-  similarity: number;
-  same_cluster: boolean;
+  skill: string
+  similarity: number
+  same_cluster: boolean
 }
 
 export interface RelatedSkillsResponse {
-  skill: string;
-  related: RelatedSkill[];
+  skill: string
+  related: RelatedSkill[]
 }
 
 export interface CompanySimilarity {
-  company_name: string;
-  similarity_score: number;
-  job_count: number;
-  avg_salary: number | null;
-  top_skills: string[];
+  company_name: string
+  similarity_score: number
+  job_count: number
+  avg_salary: number | null
+  top_skills: string[]
 }
 
 export interface StatsResponse {
-  total_jobs: number;
-  jobs_with_embeddings: number;
-  embedding_coverage_pct: number;
-  unique_skills: number;
-  unique_companies: number;
-  index_size_mb: number;
-  model_version: string;
+  total_jobs: number
+  jobs_with_embeddings: number
+  embedding_coverage_pct: number
+  unique_skills: number
+  unique_companies: number
+  index_size_mb: number
+  model_version: string
 }
 
 export interface HealthResponse {
-  status: string;
-  index_loaded: boolean;
-  degraded: boolean;
+  status: string
+  index_loaded: boolean
+  degraded: boolean
 }
 
 export interface PopularQuery {
-  query: string;
-  count: number;
+  query: string
+  count: number
+  avg_latency_ms?: number
 }
 
 export interface PerformanceStats {
-  p50_ms: number;
-  p90_ms: number;
-  p95_ms: number;
-  p99_ms: number;
-  total_queries: number;
+  p50_ms: number
+  p90_ms: number
+  p95_ms: number
+  p99_ms: number
+  total_queries: number
 }
 
-// =============================================================================
-// UI Types
-// =============================================================================
+export interface TrendPoint {
+  month: string
+  job_count: number
+  market_share: number
+  median_salary_annual: number | null
+  momentum: number
+}
 
-export interface Filters {
-  salary_min: number | null;
-  salary_max: number | null;
-  employment_type: string | null;
-  company: string | null;
+export interface SkillTrendSeries {
+  skill: string
+  series: TrendPoint[]
+  latest: TrendPoint | null
+}
+
+export interface RoleTrendResponse {
+  query: string
+  series: TrendPoint[]
+  latest: TrendPoint | null
+}
+
+export interface MonthlySkillSnapshot {
+  month: string
+  skills: SkillCloudItem[]
+}
+
+export interface CompanyTrendResponse {
+  company_name: string
+  series: TrendPoint[]
+  top_skills_by_month: MonthlySkillSnapshot[]
+  similar_companies: CompanySimilarity[]
+}
+
+export interface OverviewMetric {
+  total_jobs: number
+  current_month_jobs: number
+  unique_companies: number
+  unique_skills: number
+  avg_salary_annual: number | null
+}
+
+export interface MomentumCard {
+  name: string
+  job_count: number
+  momentum: number
+  median_salary_annual: number | null
+}
+
+export interface InsightCard {
+  label: string
+  value: number | null
+  delta: number
+}
+
+export interface SalaryMovement {
+  current_median_salary_annual: number | null
+  previous_median_salary_annual: number | null
+  change_pct: number
+}
+
+export interface OverviewResponse {
+  headline_metrics: OverviewMetric
+  rising_skills: MomentumCard[]
+  rising_companies: MomentumCard[]
+  salary_movement: SalaryMovement
+  market_insights: InsightCard[]
+}
+
+export interface ProfileMatchResponse {
+  results: JobResult[]
+  extracted_skills: string[]
+  total_candidates: number
+  search_time_ms: number
+  degraded: boolean
 }
 
 // =============================================================================
@@ -152,11 +267,11 @@ export interface Filters {
 // =============================================================================
 
 export interface ErrorDetail {
-  code: string;
-  message: string;
-  details?: Record<string, unknown>;
+  code: string
+  message: string
+  details?: Record<string, unknown>
 }
 
 export interface ErrorResponse {
-  error: ErrorDetail;
+  error: ErrorDetail
 }

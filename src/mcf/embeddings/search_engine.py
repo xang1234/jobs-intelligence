@@ -25,6 +25,7 @@ Example:
 
 import hashlib
 import logging
+import re
 import time
 from datetime import date
 from pathlib import Path
@@ -44,6 +45,7 @@ from .models import (
     CompanySimilarity,
     CompanySimilarityRequest,
     JobResult,
+    SearchExplanation,
     SearchRequest,
     SearchResponse,
     SimilarJobsRequest,
@@ -127,6 +129,7 @@ class SemanticSearchEngine:
         self._degraded = False
         self._has_vector_index = False
         self._has_skill_clusters = False
+        self._skill_vocabulary: Optional[list[tuple[str, str]]] = None
 
     def load(self) -> bool:
         """
@@ -259,8 +262,10 @@ class SemanticSearchEngine:
                     logger.debug(f"Query expanded: '{request.query}' -> {expanded}")
 
             # Step 3: Compute hybrid scores
+            reference_skills = self._extract_skills_from_text(search_query)
+            query_terms = query_expansion or self._query_terms(request.query)
             if self._has_vector_index and not self._degraded:
-                scored_results = self._compute_hybrid_scores(
+                scored_results, score_details = self._compute_hybrid_scores(
                     query=request.query,
                     search_query=search_query,
                     candidate_uuids=candidate_uuids,
@@ -269,7 +274,7 @@ class SemanticSearchEngine:
                 )
             else:
                 # Degraded mode: keyword-only search
-                scored_results = self._keyword_only_scores(
+                scored_results, score_details = self._keyword_only_scores(
                     search_query=search_query,
                     candidate_uuids=candidate_uuids,
                     freshness_weight=request.freshness_weight,
@@ -283,7 +288,12 @@ class SemanticSearchEngine:
             ][: request.limit]
 
             # Step 5: Enrich with full job data
-            results = self._enrich_results(filtered_results)
+            results = self._enrich_results(
+                filtered_results,
+                score_details=score_details,
+                reference_skills=reference_skills,
+                query_terms=query_terms,
+            )
 
             response = SearchResponse(
                 results=results,
@@ -361,6 +371,7 @@ class SemanticSearchEngine:
 
         # Filter results
         filtered: list[tuple[str, float]] = []
+        score_details: dict[str, dict[str, float | list[str]]] = {}
         if request.exclude_same_company and source_job:
             candidate_uuids = [u for u, _ in results if u != request.job_uuid]
             jobs_bulk = self.db.get_jobs_bulk(candidate_uuids)
@@ -381,6 +392,9 @@ class SemanticSearchEngine:
                     continue
 
             filtered.append((uuid, score))
+            score_details[uuid] = {
+                "semantic_score": round(float(score), 4),
+            }
 
             if len(filtered) >= request.limit:
                 break
@@ -393,8 +407,20 @@ class SemanticSearchEngine:
                 for uuid, score in filtered
             ]
             filtered.sort(key=lambda x: x[1], reverse=True)
+            for uuid, total_score in filtered:
+                detail = score_details.setdefault(uuid, {})
+                detail["freshness_score"] = round(float(freshness.get(uuid, 0.5)), 4)
+                detail["overall_fit"] = round(float(total_score), 4)
 
-        results_enriched = self._enrich_results(filtered)
+        reference_skills = self._parse_skills(source_job.get("skills")) if source_job else []
+        query_terms = reference_skills or [request.job_uuid]
+
+        results_enriched = self._enrich_results(
+            filtered,
+            score_details=score_details,
+            reference_skills=reference_skills,
+            query_terms=query_terms,
+        )
 
         return SearchResponse(
             results=results_enriched,
@@ -471,7 +497,19 @@ class SemanticSearchEngine:
                 ]
 
             filtered = filtered[: request.limit]
-            results_enriched = self._enrich_results(filtered)
+            score_details = {
+                uuid: {
+                    "semantic_score": round(float(score), 4),
+                    "overall_fit": round(float(score), 4),
+                }
+                for uuid, score in filtered
+            }
+            results_enriched = self._enrich_results(
+                filtered,
+                score_details=score_details,
+                reference_skills=[request.skill],
+                query_terms=[request.skill],
+            )
 
             return SearchResponse(
                 results=results_enriched,
@@ -487,6 +525,125 @@ class SemanticSearchEngine:
                 search_time_ms=(time.time() - start_time) * 1000,
                 degraded=True,
             )
+
+    def match_profile(
+        self,
+        profile_text: str,
+        target_titles: Optional[list[str]] = None,
+        salary_expectation_annual: Optional[int] = None,
+        employment_type: Optional[str] = None,
+        region: Optional[str] = None,
+        limit: int = 20,
+    ) -> dict:
+        """
+        Match a pasted candidate profile against job postings.
+
+        Uses the profile embedding for semantic retrieval, then re-ranks with
+        deterministic feature scoring so the UI can explain each match.
+        """
+        start_time = time.time()
+
+        if not self._loaded:
+            self.load()
+
+        extracted_skills = self._extract_skills_from_text(profile_text)
+        normalized_titles = [title.lower() for title in (target_titles or []) if title.strip()]
+        profile_level = self._infer_profile_seniority(profile_text, target_titles or [])
+
+        candidate_rows: list[tuple[str, float]] = []
+        if self._has_vector_index and not self._degraded:
+            profile_embedding = self._get_query_embedding(profile_text)
+            search_k = max(limit * 30, 300)
+            candidate_rows = self.index_manager.search_jobs(profile_embedding, k=search_k)
+        else:
+            keyword_seed = " ".join(extracted_skills[:5]) or profile_text[:120]
+            fallback = self._keyword_fallback_search(
+                SearchRequest(
+                    query=keyword_seed,
+                    employment_type=employment_type,
+                    region=region,
+                    limit=max(limit * 10, 100),
+                ),
+                start_time,
+            )
+            candidate_rows = [(job.uuid, job.similarity_score) for job in fallback.results]
+
+        jobs = self.db.get_jobs_bulk([uuid for uuid, _ in candidate_rows])
+        scored: list[tuple[str, float]] = []
+        score_details: dict[str, dict[str, float | list[str]]] = {}
+
+        for uuid, raw_semantic in candidate_rows:
+            job = jobs.get(uuid)
+            if not job:
+                continue
+
+            if employment_type and job.get("employment_type") != employment_type:
+                continue
+            if region and job.get("region") != region:
+                continue
+            if normalized_titles and not any(
+                title in (job.get("title", "").lower()) for title in normalized_titles
+            ):
+                continue
+
+            job_skills = self._parse_skills(job.get("skills"))
+            matched_skills = sorted(set(extracted_skills).intersection(job_skills))
+            missing_skills = sorted(set(extracted_skills) - set(job_skills))
+            skill_overlap = (
+                len(matched_skills) / len(extracted_skills)
+                if extracted_skills
+                else 0.0
+            )
+
+            semantic_score = float(raw_semantic) if self._has_vector_index and not self._degraded else 0.0
+            seniority_fit = self._score_seniority(
+                profile_level,
+                self._normalize_seniority(job.get("seniority")),
+            )
+            salary_fit = self._score_salary_alignment(
+                salary_expectation_annual,
+                job.get("salary_annual_min"),
+                job.get("salary_annual_max"),
+            )
+
+            weighted_parts = [
+                (0.45, semantic_score),
+                (0.35, skill_overlap),
+                (0.10, seniority_fit),
+            ]
+            if salary_expectation_annual is not None and salary_fit is not None:
+                weighted_parts.append((0.10, salary_fit))
+
+            total_weight = sum(weight for weight, _ in weighted_parts) or 1.0
+            overall_fit = sum(weight * value for weight, value in weighted_parts) / total_weight
+
+            scored.append((uuid, overall_fit))
+            score_details[uuid] = {
+                "semantic_score": round(float(semantic_score), 4),
+                "skill_overlap_score": round(float(skill_overlap), 4),
+                "seniority_fit": round(float(seniority_fit), 4),
+                "salary_fit": round(float(salary_fit), 4) if salary_fit is not None else None,
+                "overall_fit": round(float(overall_fit), 4),
+                "matched_skills": matched_skills,
+                "missing_skills": missing_skills[:10],
+            }
+
+        scored.sort(key=lambda item: item[1], reverse=True)
+        limited = scored[:limit]
+        results = self._enrich_results(
+            limited,
+            score_details=score_details,
+            reference_skills=extracted_skills,
+            query_terms=target_titles or extracted_skills[:8],
+        )
+
+        return {
+            "results": results,
+            "extracted_skills": extracted_skills,
+            "total_candidates": len(scored),
+            "search_time_ms": (time.time() - start_time) * 1000,
+            "degraded": self._degraded,
+        }
 
     def find_similar_companies(
         self, request: CompanySimilarityRequest
@@ -780,7 +937,7 @@ class SemanticSearchEngine:
         candidate_uuids: list[str],
         alpha: float,
         freshness_weight: float,
-    ) -> list[tuple[str, float]]:
+    ) -> tuple[list[tuple[str, float]], dict[str, dict[str, float | list[str]]]]:
         """
         Compute hybrid scores combining semantic and keyword search.
 
@@ -828,6 +985,7 @@ class SemanticSearchEngine:
 
         # Combine scores
         combined: dict[str, float] = {}
+        details: dict[str, dict[str, float | list[str]]] = {}
         for uuid in candidate_uuids:
             sem_score = semantic_scores.get(uuid, 0.0)
             bm25_score = bm25_scores.get(uuid, 0.0)
@@ -838,11 +996,17 @@ class SemanticSearchEngine:
                 + (1 - alpha) * bm25_score
                 + freshness_weight * fresh_score
             )
+            details[uuid] = {
+                "semantic_score": round(float(sem_score), 4),
+                "bm25_score": round(float(bm25_score), 4),
+                "freshness_score": round(float(fresh_score), 4),
+                "overall_fit": round(float(combined[uuid]), 4),
+            }
 
         # Sort by score descending
         sorted_results = sorted(combined.items(), key=lambda x: x[1], reverse=True)
 
-        return sorted_results
+        return sorted_results, details
 
     def _get_bm25_scores(
         self, query: str, candidate_uuids: list[str]
@@ -880,7 +1044,7 @@ class SemanticSearchEngine:
         search_query: str,
         candidate_uuids: list[str],
         freshness_weight: float,
-    ) -> list[tuple[str, float]]:
+    ) -> tuple[list[tuple[str, float]], dict[str, dict[str, float | list[str]]]]:
         """
         Compute scores using only keyword (BM25) search.
 
@@ -904,13 +1068,19 @@ class SemanticSearchEngine:
         )
 
         combined: dict[str, float] = {}
+        details: dict[str, dict[str, float | list[str]]] = {}
         for uuid in candidate_uuids:
             bm25_score = bm25_scores.get(uuid, 0.0)
             fresh_score = freshness_scores.get(uuid, 0.5)
             combined[uuid] = bm25_score + freshness_weight * fresh_score
+            details[uuid] = {
+                "bm25_score": round(float(bm25_score), 4),
+                "freshness_score": round(float(fresh_score), 4),
+                "overall_fit": round(float(combined[uuid]), 4),
+            }
 
         sorted_results = sorted(combined.items(), key=lambda x: x[1], reverse=True)
-        return sorted_results
+        return sorted_results, details
 
     def _keyword_fallback_search(
         self, request: SearchRequest, start_time: float
@@ -935,14 +1105,19 @@ class SemanticSearchEngine:
                 degraded=True,
             )
 
-        scored_results = self._keyword_only_scores(
+        scored_results, score_details = self._keyword_only_scores(
             search_query=request.query,
             candidate_uuids=[c["uuid"] for c in candidates],
             freshness_weight=request.freshness_weight,
         )
 
         filtered_results = scored_results[: request.limit]
-        results = self._enrich_results(filtered_results)
+        results = self._enrich_results(
+            filtered_results,
+            score_details=score_details,
+            reference_skills=self._extract_skills_from_text(request.query),
+            query_terms=self._query_terms(request.query),
+        )
 
         return SearchResponse(
             results=results,
@@ -1012,8 +1187,116 @@ class SemanticSearchEngine:
             for uuid, score in scores.items()
         }
 
+    def _load_skill_vocabulary(self) -> list[tuple[str, str]]:
+        """Load and cache the canonical skill vocabulary for extraction."""
+        if self._skill_vocabulary is None:
+            skills = self.db.get_all_unique_skills()
+            self._skill_vocabulary = [
+                (skill, skill.lower())
+                for skill in sorted(skills, key=len, reverse=True)
+                if len(skill.strip()) >= 2
+            ]
+        return self._skill_vocabulary
+
+    @staticmethod
+    def _parse_skills(skills: Optional[str]) -> list[str]:
+        """Split a comma-separated skills string into normalized labels."""
+        if not skills:
+            return []
+        return [skill.strip() for skill in skills.split(",") if skill.strip()]
+
+    @staticmethod
+    def _query_terms(query: str) -> list[str]:
+        """Extract a small set of readable query terms for explanations."""
+        terms = [term for term in re.split(r"\W+", query) if len(term) >= 3]
+        return terms[:8]
+
+    def _extract_skills_from_text(self, text: str, limit: int = 12) -> list[str]:
+        """Deterministically extract known skill names from free text."""
+        normalized_text = f" {text.lower()} "
+        matches: list[str] = []
+        for skill, lowered in self._load_skill_vocabulary():
+            pattern = rf"(?<![a-z0-9]){re.escape(lowered)}(?![a-z0-9])"
+            if re.search(pattern, normalized_text):
+                matches.append(skill)
+                if len(matches) >= limit:
+                    break
+        return matches
+
+    @staticmethod
+    def _normalize_seniority(raw: Optional[str]) -> Optional[str]:
+        """Map free-form seniority labels into a small ordered vocabulary."""
+        if not raw:
+            return None
+        value = raw.lower()
+        mapping = {
+            "intern": ["intern", "attachment", "trainee"],
+            "junior": ["junior", "entry", "associate", "executive"],
+            "mid": ["mid", "experienced", "specialist"],
+            "senior": ["senior", "lead", "manager", "principal"],
+            "director": ["director", "head", "vp", "vice president"],
+        }
+        for level, keywords in mapping.items():
+            if any(keyword in value for keyword in keywords):
+                return level
+        return None
+
+    def _infer_profile_seniority(
+        self, profile_text: str, target_titles: Optional[list[str]] = None
+    ) -> Optional[str]:
+        """Infer approximate seniority from the pasted profile text."""
+        combined = " ".join((target_titles or []) + [profile_text])
+        return self._normalize_seniority(combined)
+
+    @staticmethod
+    def _score_seniority(profile_level: Optional[str], job_level: Optional[str]) -> float:
+        """Score how close the candidate's inferred level is to the job level."""
+        if profile_level is None or job_level is None:
+            return 0.5
+
+        order = ["intern", "junior", "mid", "senior", "director"]
+        profile_idx = order.index(profile_level)
+        job_idx = order.index(job_level)
+        distance = abs(profile_idx - job_idx)
+        if distance == 0:
+            return 1.0
+        if distance == 1:
+            return 0.7
+        if distance == 2:
+            return 0.35
+        return 0.1
+
+    @staticmethod
+    def _score_salary_alignment(
+        expectation_annual: Optional[int],
+        salary_annual_min: Optional[int],
+        salary_annual_max: Optional[int],
+    ) -> Optional[float]:
+        """Score how well a job salary range aligns to an annual expectation."""
+        if expectation_annual is None:
+            return None
+
+        if salary_annual_min is None and salary_annual_max is None:
+            return 0.5
+
+        low = salary_annual_min if salary_annual_min is not None else salary_annual_max
+        high = salary_annual_max if salary_annual_max is not None else salary_annual_min
+        assert low is not None and high is not None
+
+        if low <= expectation_annual <= high:
+            return 1.0
+        if expectation_annual < low:
+            gap = (low - expectation_annual) / max(low, 1)
+        else:
+            gap = (expectation_annual - high) / max(expectation_annual, 1)
+        return max(0.0, round(1.0 - gap, 4))
+
     def _enrich_results(
-        self, scored_results: list[tuple[str, float]]
+        self,
+        scored_results: list[tuple[str, float]],
+        score_details: Optional[dict[str, dict[str, float | list[str]]]] = None,
+        reference_skills: Optional[list[str]] = None,
+        query_terms: Optional[list[str]] = None,
     ) -> list[JobResult]:
         """
         Convert (uuid, score) tuples to full JobResult objects.
@@ -1027,9 +1310,12 @@ class SemanticSearchEngine:
         results: list[JobResult] = []
 
         jobs = self.db.get_jobs_bulk([uuid for uuid, _ in scored_results])
+        reference_set = set(reference_skills or [])
         for uuid, score in scored_results:
             job = jobs.get(uuid)
             if job:
+                details = score_details.get(uuid, {}) if score_details else {}
+
                 # Parse posted_date if it's a string
                 posted_date = job.get("posted_date")
                 if isinstance(posted_date, str):
@@ -1043,6 +1329,23 @@ class SemanticSearchEngine:
                 if len(description) > 500:
                     description = description[:500] + "..."
 
+                job_skills = self._parse_skills(job.get("skills"))
+                matched_skills = sorted(reference_set.intersection(job_skills))
+                missing_skills = sorted(reference_set - set(job_skills))
+
+                explanation = SearchExplanation(
+                    semantic_score=details.get("semantic_score"),
+                    bm25_score=details.get("bm25_score"),
+                    freshness_score=details.get("freshness_score"),
+                    matched_skills=details.get("matched_skills", matched_skills),
+                    missing_skills=details.get("missing_skills", missing_skills[:10]),
+                    query_terms=query_terms or [],
+                    skill_overlap_score=details.get("skill_overlap_score"),
+                    seniority_fit=details.get("seniority_fit"),
+                    salary_fit=details.get("salary_fit"),
+                    overall_fit=details.get("overall_fit", round(float(score), 4)),
+                )
+
                 results.append(
                     JobResult(
                         uuid=job["uuid"],
@@ -1052,11 +1355,18 @@ class SemanticSearchEngine:
                         salary_min=job.get("salary_min"),
                         salary_max=job.get("salary_max"),
                         employment_type=job.get("employment_type"),
+                        seniority=job.get("seniority"),
                         skills=job.get("skills"),
                         location=job.get("location"),
                         posted_date=posted_date,
                         job_url=job.get("job_url"),
                         similarity_score=score,
+                        semantic_score=details.get("semantic_score"),
+                        bm25_score=details.get("bm25_score"),
+                        freshness_score=details.get("freshness_score"),
+                        matched_skills=explanation.matched_skills,
+                        missing_skills=explanation.missing_skills,
+                        explanations=explanation,
                     )
                 )
 

@@ -1,31 +1,30 @@
-# MyCareersFuture Job Market Intelligence Platform
+# MCF Hiring-Market Intelligence Platform
 
-A job market data collection and semantic search platform for MyCareersFuture.sg. Scrapes job listings, generates vector embeddings, and serves hybrid BM25 + FAISS search through a REST API with a React frontend.
+MCF is a Singapore hiring-market intelligence platform built on top of MyCareersFuture.sg data. It combines historical job collection, hybrid BM25 + FAISS retrieval, explainable NLP ranking, market-trend analytics, and profile-to-job matching in one stack.
 
 ## Features
 
-**Data Collection**
-- Fast API-based scraping — ~1-2 minutes for 2,000 jobs
-- Historical archive access — enumerate all ~6.2M jobs from 2019-present
-- SQLite storage with automatic deduplication and history tracking
-- Resumable scrapes, daemon mode, adaptive rate limiting, per-ID tracking
+**Market Intelligence**
+- Overview dashboard with headline hiring metrics, rising skills, rising companies, and salary movement
+- Trends Explorer for skill, role, and company demand over monthly time buckets
+- Company intelligence view with hiring-pattern similarity and top-skill snapshots
 
-**Semantic Search**
+**Explainable NLP**
 - Hybrid ranking combining FAISS vector similarity + BM25 keyword matching
 - Query expansion with skill-cluster synonyms
-- Freshness boosting for recent postings
-- Skill similarity search, related skills discovery, company similarity
+- Visible "Why this matched" breakdown on search and match results
+- Related-skills graph, skill similarity search, and company similarity
 - Degraded mode (keyword-only) when indexes are unavailable
 
-**REST API**
-- 12 endpoints covering search, recommendations, skills, analytics
-- Rate limiting, CORS, request logging middleware
-- Interactive Swagger docs at `/docs`
+**Profile Matching**
+- Paste a candidate profile or resume summary and rank matching jobs
+- Deterministic fit scoring across semantic similarity, skill overlap, seniority, and salary fit
+- Matched-skills and missing-skills evidence returned with every result
 
-**Deployment**
-- Docker Compose with backend + frontend/nginx services
-- Production overrides with resource limits and bind mounts
-- Data bootstrap script for seeding containers from local data
+**Data Platform**
+- Fast API-based scraping and historical archive access from 2019-present
+- SQLite storage with automatic deduplication, history tracking, search analytics, and annual salary normalization
+- Docker Compose deployment with backend + frontend/nginx services
 
 ## Quick Start
 
@@ -45,11 +44,25 @@ poetry run python -m src.cli search-semantic "machine learning engineer"
 # Start API server (Swagger UI at http://localhost:8000/docs)
 poetry run python -m src.cli api-serve --reload
 
+# Start the frontend (from src/frontend/)
+cd src/frontend
+npm install
+npm run dev
+
 # Or run everything with Docker
 docker compose up
 ```
 
 > **Tip:** Add an alias for convenience: `alias mcf="poetry run python -m src.cli"`
+
+## Demo Narrative
+
+Use the app as a guided demo for recruiter and talent-intelligence workflows:
+
+- `Overview` answers: Which skills are rising? Which companies are accelerating hiring? Are salary medians moving?
+- `Trends Explorer` answers: How is demand for Python vs SQL vs Machine Learning changing over time? Which employers are following similar hiring patterns?
+- `Match Lab` answers: How well does this profile fit the current market, and which skills are missing?
+- `Search & Similarity` answers: Why did the retriever rank this role highly, and which related skills live in the same semantic neighborhood?
 
 ## Installation
 
@@ -57,8 +70,8 @@ Requires Python 3.10+
 
 ```bash
 # Clone the repository
-git clone https://github.com/xang1234/JobScraper.git
-cd JobScraper
+git clone https://github.com/xang1234/MyCareersFuture.git
+cd MyCareersFuture
 
 # Install with Poetry
 poetry install
@@ -463,6 +476,11 @@ The rate limiter only trusts `X-Forwarded-For` headers from IPs listed in `MCF_T
 | `/api/skills/cloud` | GET | Skill frequency data for visualization |
 | `/api/skills/related/{skill}` | GET | Related skills with similarity scores |
 | `/api/companies/similar` | POST | Find companies with similar job profiles |
+| `/api/overview` | GET | Dashboard metrics, rising skills, rising companies, salary movement |
+| `/api/trends/skills` | POST | Monthly trend comparison for up to 3 skills |
+| `/api/trends/roles` | POST | Monthly trend series for a role/query |
+| `/api/trends/companies/{company_name}` | GET | Company hiring trend, top skills by month, similar companies |
+| `/api/match/profile` | POST | Profile-to-job matching with fit breakdown |
 | `/api/stats` | GET | System statistics (index size, coverage) |
 | `/api/analytics/popular` | GET | Popular search queries |
 | `/api/analytics/performance` | GET | Search latency percentiles (p50/p90/p95/p99) |

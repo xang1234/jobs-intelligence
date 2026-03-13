@@ -152,6 +152,27 @@ class SearchRequest:
 
 
 @dataclass
+class SearchExplanation:
+    """
+    Structured explanation for why a job matched.
+
+    This is reused by search, similar-jobs, and profile-matching flows so the
+    API can expose consistent evidence and score decomposition.
+    """
+
+    semantic_score: Optional[float] = None
+    bm25_score: Optional[float] = None
+    freshness_score: Optional[float] = None
+    matched_skills: list[str] = field(default_factory=list)
+    missing_skills: list[str] = field(default_factory=list)
+    query_terms: list[str] = field(default_factory=list)
+    skill_overlap_score: Optional[float] = None
+    seniority_fit: Optional[float] = None
+    salary_fit: Optional[float] = None
+    overall_fit: Optional[float] = None
+
+
+@dataclass
 class JobResult:
     """
     Single job result from semantic search.
@@ -166,11 +187,18 @@ class JobResult:
     salary_min: Optional[int] = None
     salary_max: Optional[int] = None
     employment_type: Optional[str] = None
+    seniority: Optional[str] = None
     skills: Optional[str] = None
     location: Optional[str] = None
     posted_date: Optional[date] = None
     job_url: Optional[str] = None
     similarity_score: float = 0.0
+    semantic_score: Optional[float] = None
+    bm25_score: Optional[float] = None
+    freshness_score: Optional[float] = None
+    matched_skills: list[str] = field(default_factory=list)
+    missing_skills: list[str] = field(default_factory=list)
+    explanations: Optional[SearchExplanation] = None
 
 
 @dataclass

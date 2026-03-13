@@ -70,6 +70,13 @@ def _make_mock_engine(degraded=False, loaded=True):
     engine.find_similar.return_value = fake_response
     engine.search_by_skill.return_value = fake_response
     engine.find_similar_companies.return_value = [FakeCompanySimilarity()]
+    engine.match_profile.return_value = {
+        "results": [fake_result],
+        "extracted_skills": ["Python", "SQL"],
+        "total_candidates": 24,
+        "search_time_ms": 51.0,
+        "degraded": False,
+    }
     engine.get_stats.return_value = {
         "model_version": "all-MiniLM-L6-v2",
         "embedding_stats": {
@@ -103,6 +110,63 @@ def _make_mock_engine(degraded=False, loaded=True):
     ]
     engine.db.get_search_latency_percentiles.return_value = {
         "p50": 30.0, "p90": 80.0, "p95": 100.0, "p99": 200.0
+    }
+    engine.db.get_overview.return_value = {
+        "headline_metrics": {
+            "total_jobs": 50000,
+            "current_month_jobs": 1200,
+            "unique_companies": 3000,
+            "unique_skills": 1200,
+            "avg_salary_annual": 144000,
+        },
+        "rising_skills": [
+            {"name": "Python", "job_count": 400, "momentum": 12.5, "median_salary_annual": 156000},
+        ],
+        "rising_companies": [
+            {"name": "TestCo", "job_count": 32, "momentum": 18.0, "median_salary_annual": 168000},
+        ],
+        "salary_movement": {
+            "current_median_salary_annual": 156000,
+            "previous_median_salary_annual": 150000,
+            "change_pct": 4.0,
+        },
+        "market_insights": [
+            {"label": "Monthly hiring velocity", "value": 1200, "delta": 8.5},
+        ],
+    }
+    engine.db.get_skill_trends.return_value = [
+        {
+            "skill": "Python",
+            "series": [
+                {"month": "2026-01", "job_count": 10, "market_share": 5.0, "median_salary_annual": 150000, "momentum": 0.0},
+                {"month": "2026-02", "job_count": 14, "market_share": 6.2, "median_salary_annual": 155000, "momentum": 40.0},
+            ],
+            "latest": {"month": "2026-02", "job_count": 14, "market_share": 6.2, "median_salary_annual": 155000, "momentum": 40.0},
+        },
+    ]
+    engine.db.get_role_trend.return_value = {
+        "query": "data scientist",
+        "series": [
+            {"month": "2026-01", "job_count": 9, "market_share": 4.0, "median_salary_annual": 148000, "momentum": 0.0},
+            {"month": "2026-02", "job_count": 15, "market_share": 6.4, "median_salary_annual": 160000, "momentum": 50.0},
+        ],
+        "latest": {"month": "2026-02", "job_count": 15, "market_share": 6.4, "median_salary_annual": 160000, "momentum": 50.0},
+    }
+    engine.db.get_company_trend.return_value = {
+        "company_name": "TestCo",
+        "series": [
+            {"month": "2026-01", "job_count": 5, "market_share": 2.0, "median_salary_annual": 150000, "momentum": 0.0},
+            {"month": "2026-02", "job_count": 8, "market_share": 3.2, "median_salary_annual": 158000, "momentum": 60.0},
+        ],
+        "top_skills_by_month": [
+            {
+                "month": "2026-02",
+                "skills": [
+                    {"skill": "Python", "job_count": 8, "cluster_id": None},
+                    {"skill": "SQL", "job_count": 5, "cluster_id": None},
+                ],
+            },
+        ],
     }
     return engine
 
@@ -398,6 +462,48 @@ class TestCompanySimilarityEndpoint:
             "company_name": "",
         })
         assert resp.status_code == 422
+
+
+class TestMarketIntelligenceEndpoints:
+    def test_overview(self, client, mock_engine):
+        resp = client.get("/api/overview?months=12")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["headline_metrics"]["total_jobs"] == 50000
+        mock_engine.db.get_overview.assert_called_once_with(months=12)
+
+    def test_skill_trends(self, client, mock_engine):
+        resp = client.post("/api/trends/skills", json={"skills": ["Python"], "months": 12})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data[0]["skill"] == "Python"
+        assert data[0]["latest"]["job_count"] == 14
+
+    def test_role_trends(self, client, mock_engine):
+        resp = client.post("/api/trends/roles", json={"query": "data scientist", "months": 12})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["query"] == "data scientist"
+        assert data["latest"]["momentum"] == 50.0
+
+    def test_company_trends(self, client, mock_engine):
+        resp = client.get("/api/trends/companies/TestCo?months=12")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["company_name"] == "TestCo"
+        assert data["similar_companies"][0]["company_name"] == "SimilarCo"
+
+    def test_profile_match(self, client, mock_engine):
+        resp = client.post("/api/match/profile", json={
+            "profile_text": "Senior analytics leader with Python and SQL experience across ML platforms.",
+            "target_titles": ["Data Scientist"],
+            "salary_expectation_annual": 180000,
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["extracted_skills"] == ["Python", "SQL"]
+        assert data["total_candidates"] == 24
+        mock_engine.match_profile.assert_called_once()
 
 
 # =============================================================================

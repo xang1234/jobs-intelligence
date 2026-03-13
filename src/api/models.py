@@ -183,6 +183,39 @@ class CompanySimilarityRequest(BaseModel):
         )
 
 
+class TrendFilters(BaseModel):
+    """Reusable filter set for market-intelligence endpoints."""
+
+    company: Optional[str] = None
+    employment_type: Optional[str] = None
+    region: Optional[str] = None
+
+
+class SkillTrendRequest(TrendFilters):
+    """Request for one or more skill time series."""
+
+    skills: list[str] = Field(..., min_length=1, max_length=3)
+    months: int = Field(12, ge=3, le=24)
+
+
+class RoleTrendRequest(TrendFilters):
+    """Request for a role/query trend series."""
+
+    query: str = Field(..., min_length=1, max_length=200)
+    months: int = Field(12, ge=3, le=24)
+
+
+class ProfileMatchRequest(BaseModel):
+    """Request for profile-to-job matching."""
+
+    profile_text: str = Field(..., min_length=20, max_length=20000)
+    target_titles: list[str] = Field(default_factory=list, max_length=10)
+    salary_expectation_annual: Optional[int] = Field(None, ge=0)
+    employment_type: Optional[str] = None
+    region: Optional[str] = None
+    limit: int = Field(20, ge=1, le=100)
+
+
 # =============================================================================
 # Response Models
 # =============================================================================
@@ -198,13 +231,18 @@ class JobResult(BaseModel):
     salary_min: Optional[int] = None
     salary_max: Optional[int] = None
     employment_type: Optional[str] = None
+    seniority: Optional[str] = None
     skills: Optional[str] = None
     location: Optional[str] = None
     posted_date: Optional[date] = None
     job_url: Optional[str] = None
     similarity_score: float = Field(description="Combined hybrid score [0, 1]")
+    semantic_score: Optional[float] = Field(None, description="Semantic similarity component")
     bm25_score: Optional[float] = Field(None, description="BM25 keyword score")
     freshness_score: Optional[float] = Field(None, description="Recency score")
+    matched_skills: list[str] = Field(default_factory=list)
+    missing_skills: list[str] = Field(default_factory=list)
+    explanations: Optional["MatchExplanation"] = None
 
     @classmethod
     def from_internal(cls, internal) -> "JobResult":
@@ -212,16 +250,56 @@ class JobResult(BaseModel):
         return cls(
             uuid=internal.uuid,
             title=internal.title,
-            company_name=internal.company_name,
-            description=internal.description,
-            salary_min=internal.salary_min,
-            salary_max=internal.salary_max,
-            employment_type=internal.employment_type,
-            skills=internal.skills,
-            location=internal.location,
-            posted_date=internal.posted_date,
-            job_url=internal.job_url,
-            similarity_score=internal.similarity_score,
+            company_name=getattr(internal, "company_name", None),
+            description=getattr(internal, "description", ""),
+            salary_min=getattr(internal, "salary_min", None),
+            salary_max=getattr(internal, "salary_max", None),
+            employment_type=getattr(internal, "employment_type", None),
+            seniority=getattr(internal, "seniority", None),
+            skills=getattr(internal, "skills", None),
+            location=getattr(internal, "location", None),
+            posted_date=getattr(internal, "posted_date", None),
+            job_url=getattr(internal, "job_url", None),
+            similarity_score=getattr(internal, "similarity_score", 0.0),
+            semantic_score=getattr(internal, "semantic_score", None),
+            bm25_score=getattr(internal, "bm25_score", None),
+            freshness_score=getattr(internal, "freshness_score", None),
+            matched_skills=getattr(internal, "matched_skills", []),
+            missing_skills=getattr(internal, "missing_skills", []),
+            explanations=MatchExplanation.from_internal(getattr(internal, "explanations"))
+            if getattr(internal, "explanations", None)
+            else None,
+        )
+
+
+class MatchExplanation(BaseModel):
+    """Structured evidence for search and profile matches."""
+
+    semantic_score: Optional[float] = None
+    bm25_score: Optional[float] = None
+    freshness_score: Optional[float] = None
+    matched_skills: list[str] = Field(default_factory=list)
+    missing_skills: list[str] = Field(default_factory=list)
+    query_terms: list[str] = Field(default_factory=list)
+    skill_overlap_score: Optional[float] = None
+    seniority_fit: Optional[float] = None
+    salary_fit: Optional[float] = None
+    overall_fit: Optional[float] = None
+
+    @classmethod
+    def from_internal(cls, internal) -> "MatchExplanation":
+        """Create from the internal explanation dataclass."""
+        return cls(
+            semantic_score=getattr(internal, "semantic_score", None),
+            bm25_score=getattr(internal, "bm25_score", None),
+            freshness_score=getattr(internal, "freshness_score", None),
+            matched_skills=getattr(internal, "matched_skills", []),
+            missing_skills=getattr(internal, "missing_skills", []),
+            query_terms=getattr(internal, "query_terms", []),
+            skill_overlap_score=getattr(internal, "skill_overlap_score", None),
+            seniority_fit=getattr(internal, "seniority_fit", None),
+            salary_fit=getattr(internal, "salary_fit", None),
+            overall_fit=getattr(internal, "overall_fit", None),
         )
 
 
@@ -374,6 +452,106 @@ class RelatedSkillsResponse(BaseModel):
 
     skill: str = Field(description="Input skill queried")
     related: list[RelatedSkill]
+
+
+class TrendPoint(BaseModel):
+    """Single monthly point in a market trend series."""
+
+    month: str
+    job_count: int
+    market_share: float
+    median_salary_annual: Optional[int] = None
+    momentum: float
+
+
+class SkillTrendSeries(BaseModel):
+    """Trend series for one skill."""
+
+    skill: str
+    series: list[TrendPoint]
+    latest: Optional[TrendPoint] = None
+
+
+class RoleTrendResponse(BaseModel):
+    """Trend series for a role/query."""
+
+    query: str
+    series: list[TrendPoint]
+    latest: Optional[TrendPoint] = None
+
+
+class MonthlySkillSnapshot(BaseModel):
+    """Top skills snapshot for a single month."""
+
+    month: str
+    skills: list[SkillCloudItem]
+
+
+class CompanyTrendResponse(BaseModel):
+    """Company trend response."""
+
+    company_name: str
+    series: list[TrendPoint]
+    top_skills_by_month: list[MonthlySkillSnapshot]
+    similar_companies: list[CompanySimilarity] = Field(default_factory=list)
+
+
+class OverviewMetric(BaseModel):
+    """Headline overview metrics."""
+
+    total_jobs: int
+    current_month_jobs: int
+    unique_companies: int
+    unique_skills: int
+    avg_salary_annual: Optional[int] = None
+
+
+class MomentumCard(BaseModel):
+    """Rising skill/company card."""
+
+    name: str
+    job_count: int
+    momentum: float
+    median_salary_annual: Optional[int] = None
+
+
+class InsightCard(BaseModel):
+    """Small overview insight card."""
+
+    label: str
+    value: Optional[int] = None
+    delta: float
+
+
+class SalaryMovement(BaseModel):
+    """Salary movement summary."""
+
+    current_median_salary_annual: Optional[int] = None
+    previous_median_salary_annual: Optional[int] = None
+    change_pct: float
+
+
+class OverviewResponse(BaseModel):
+    """Homepage overview payload."""
+
+    headline_metrics: OverviewMetric
+    rising_skills: list[MomentumCard]
+    rising_companies: list[MomentumCard]
+    salary_movement: SalaryMovement
+    market_insights: list[InsightCard]
+
+
+class ProfileMatchResponse(BaseModel):
+    """Profile matching response."""
+
+    results: list[JobResult]
+    extracted_skills: list[str]
+    total_candidates: int
+    search_time_ms: float
+    degraded: bool
+
+
+JobResult.model_rebuild()
 
 
 # =============================================================================
