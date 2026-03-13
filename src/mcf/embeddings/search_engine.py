@@ -595,7 +595,9 @@ class SemanticSearchEngine:
                 else 0.0
             )
 
-            semantic_score = float(raw_semantic) if self._has_vector_index and not self._degraded else 0.0
+            retrieval_score = float(raw_semantic)
+            semantic_score = retrieval_score if self._has_vector_index and not self._degraded else 0.0
+            keyword_score = retrieval_score if self._degraded else 0.0
             seniority_fit = self._score_seniority(
                 profile_level,
                 self._normalize_seniority(job.get("seniority")),
@@ -607,7 +609,7 @@ class SemanticSearchEngine:
             )
 
             weighted_parts = [
-                (0.45, semantic_score),
+                (0.45, semantic_score if not self._degraded else keyword_score),
                 (0.35, skill_overlap),
                 (0.10, seniority_fit),
             ]
@@ -619,7 +621,8 @@ class SemanticSearchEngine:
 
             scored.append((uuid, overall_fit))
             score_details[uuid] = {
-                "semantic_score": round(float(semantic_score), 4),
+                "semantic_score": round(float(semantic_score), 4) if not self._degraded else None,
+                "bm25_score": round(float(keyword_score), 4) if self._degraded else None,
                 "skill_overlap_score": round(float(skill_overlap), 4),
                 "seniority_fit": round(float(seniority_fit), 4),
                 "salary_fit": round(float(salary_fit), 4) if salary_fit is not None else None,

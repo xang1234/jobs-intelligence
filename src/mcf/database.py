@@ -14,7 +14,7 @@ Provides persistent storage with:
 import json
 import logging
 import sqlite3
-from collections import Counter
+from collections import Counter, defaultdict
 from contextlib import contextmanager
 from datetime import date, datetime
 from pathlib import Path
@@ -2048,6 +2048,32 @@ class MCFDatabase:
         self._annotate_momentum(series)
         return series
 
+    def _series_from_aggregates(
+        self,
+        month_counts: Counter | dict[str, int],
+        salary_buckets: dict[str, list[int]],
+        labels: list[str],
+        market_counts: Optional[dict[str, int]] = None,
+    ) -> list[dict]:
+        """Build a dense monthly series from pre-aggregated counts and salaries."""
+        series = []
+        for label in labels:
+            market_total = (market_counts or {}).get(label, 0)
+            job_count = int(month_counts.get(label, 0))
+            point = {
+                "month": label,
+                "job_count": job_count,
+                "market_share": round((job_count / market_total) * 100, 2)
+                if market_total > 0
+                else 0.0,
+                "median_salary_annual": self._median(salary_buckets.get(label, [])),
+                "momentum": 0.0,
+            }
+            series.append(point)
+
+        self._annotate_momentum(series)
+        return series
+
     def get_skill_trends(
         self,
         skills: list[str],
@@ -2134,7 +2160,7 @@ class MCFDatabase:
             {
                 "month": month,
                 "skills": [
-                    {"skill": skill, "job_count": count}
+                    {"skill": skill, "job_count": count, "cluster_id": None}
                     for skill, count in counter.most_common(5)
                 ],
             }
@@ -2149,87 +2175,114 @@ class MCFDatabase:
 
     def get_overview(self, months: int = 12) -> dict:
         """Return summary cards and top movers for the homepage overview."""
-        current_month = date.today().replace(day=1).strftime("%Y-%m")
-        previous_month = self._subtract_months(date.today().replace(day=1), 1).strftime("%Y-%m")
         labels = self._month_labels(months)
-        start_month = labels[0] + "-01"
+        current_month = labels[-1]
+        previous_month = labels[-2] if len(labels) > 1 else labels[-1]
+        rows = self._fetch_trend_rows(months=months)
 
-        with self._connection() as conn:
-            totals = conn.execute(
-                """
-                SELECT
-                    COUNT(*) as total_jobs,
-                    COUNT(DISTINCT company_name) as unique_companies,
-                    AVG((COALESCE(salary_annual_min, salary_annual_max) + COALESCE(salary_annual_max, salary_annual_min)) / 2.0) as avg_salary
-                FROM jobs
-                WHERE posted_date IS NOT NULL AND posted_date >= ?
-                """,
-                (start_month,),
-            ).fetchone()
+        market_counts: Counter = Counter()
+        market_salarys: dict[str, list[int]] = {label: [] for label in labels}
+        skill_counts: dict[str, Counter] = defaultdict(Counter)
+        skill_salarys: dict[str, dict[str, list[int]]] = defaultdict(
+            lambda: {label: [] for label in labels}
+        )
+        company_counts: dict[str, Counter] = defaultdict(Counter)
+        company_salarys: dict[str, dict[str, list[int]]] = defaultdict(
+            lambda: {label: [] for label in labels}
+        )
+        unique_skills: set[str] = set()
+        unique_companies: set[str] = set()
+        salary_midpoints: list[int] = []
 
-            current_jobs = conn.execute(
-                """
-                SELECT COUNT(*) FROM jobs
-                WHERE posted_date IS NOT NULL AND strftime('%Y-%m', posted_date) = ?
-                """,
-                (current_month,),
-            ).fetchone()[0]
+        for row in rows:
+            month = row["posted_date"][:7]
+            if month not in market_salarys:
+                continue
 
-            previous_jobs = conn.execute(
-                """
-                SELECT COUNT(*) FROM jobs
-                WHERE posted_date IS NOT NULL AND strftime('%Y-%m', posted_date) = ?
-                """,
-                (previous_month,),
-            ).fetchone()[0]
+            salary = self._salary_midpoint(row)
+            market_counts[month] += 1
+            if salary is not None:
+                market_salarys[month].append(salary)
+                salary_midpoints.append(salary)
 
-            top_companies_rows = conn.execute(
-                """
-                SELECT company_name, COUNT(*) as job_count
-                FROM jobs
-                WHERE posted_date IS NOT NULL
-                  AND posted_date >= ?
-                  AND company_name IS NOT NULL
-                  AND company_name != ''
-                GROUP BY company_name
-                ORDER BY job_count DESC
-                LIMIT 20
-                """,
-                (start_month,),
-            ).fetchall()
+            company_name = (row["company_name"] or "").strip()
+            if company_name:
+                unique_companies.add(company_name)
+                company_counts[company_name][month] += 1
+                if salary is not None:
+                    company_salarys[company_name][month].append(salary)
 
-        all_skills = self.get_skill_frequencies(min_jobs=10, limit=30)
-        skill_trends = self.get_skill_trends([skill for skill, _ in all_skills[:15]], months=months)
+            raw_skills = row["skills"] or ""
+            for skill in [item.strip() for item in raw_skills.split(",") if item.strip()]:
+                unique_skills.add(skill)
+                skill_counts[skill][month] += 1
+                if salary is not None:
+                    skill_salarys[skill][month].append(salary)
+
+        market_series = self._series_from_aggregates(
+            month_counts=market_counts,
+            salary_buckets=market_salarys,
+            labels=labels,
+            market_counts={label: market_counts.get(label, 0) for label in labels},
+        )
+
+        top_skills = sorted(
+            (
+                skill for skill, counts in skill_counts.items()
+                if sum(counts.values()) >= 10
+            ),
+            key=lambda skill: sum(skill_counts[skill].values()),
+            reverse=True,
+        )[:30]
         rising_skills = sorted(
             [
                 {
-                    "name": item["skill"],
-                    "job_count": item["latest"]["job_count"] if item["latest"] else 0,
-                    "momentum": item["latest"]["momentum"] if item["latest"] else 0.0,
-                    "median_salary_annual": item["latest"]["median_salary_annual"] if item["latest"] else None,
+                    "name": skill,
+                    "job_count": series[-1]["job_count"] if series else 0,
+                    "momentum": series[-1]["momentum"] if series else 0.0,
+                    "median_salary_annual": series[-1]["median_salary_annual"] if series else None,
                 }
-                for item in skill_trends
+                for skill in top_skills
+                for series in [
+                    self._series_from_aggregates(
+                        month_counts=skill_counts[skill],
+                        salary_buckets=skill_salarys[skill],
+                        labels=labels,
+                        market_counts={label: market_counts.get(label, 0) for label in labels},
+                    )
+                ]
             ],
             key=lambda item: (item["momentum"], item["job_count"]),
             reverse=True,
         )[:8]
 
-        company_trends = [self.get_company_trend(row["company_name"], months=months) for row in top_companies_rows]
+        top_companies = sorted(
+            company_counts.keys(),
+            key=lambda company: sum(company_counts[company].values()),
+            reverse=True,
+        )[:20]
         rising_companies = sorted(
             [
                 {
-                    "name": item["company_name"],
-                    "job_count": item["series"][-1]["job_count"] if item["series"] else 0,
-                    "momentum": item["series"][-1]["momentum"] if item["series"] else 0.0,
-                    "median_salary_annual": item["series"][-1]["median_salary_annual"] if item["series"] else None,
+                    "name": company,
+                    "job_count": series[-1]["job_count"] if series else 0,
+                    "momentum": series[-1]["momentum"] if series else 0.0,
+                    "median_salary_annual": series[-1]["median_salary_annual"] if series else None,
                 }
-                for item in company_trends
+                for company in top_companies
+                for series in [
+                    self._series_from_aggregates(
+                        month_counts=company_counts[company],
+                        salary_buckets=company_salarys[company],
+                        labels=labels,
+                        market_counts={label: market_counts.get(label, 0) for label in labels},
+                    )
+                ]
             ],
             key=lambda item: (item["momentum"], item["job_count"]),
             reverse=True,
         )[:8]
 
-        market_series = self._rows_to_series(self._fetch_trend_rows(months=months), months=months)
         current_salary = market_series[-1]["median_salary_annual"] if market_series else None
         previous_salary = market_series[-2]["median_salary_annual"] if len(market_series) > 1 else None
         salary_change_pct = 0.0
@@ -2239,25 +2292,26 @@ class MCFDatabase:
         insights = [
             {
                 "label": "Monthly hiring velocity",
-                "value": current_jobs,
+                "value": market_counts.get(current_month, 0),
                 "delta": round(
-                    ((current_jobs - previous_jobs) / previous_jobs) * 100, 2
-                ) if previous_jobs else (100.0 if current_jobs else 0.0),
+                    ((market_counts.get(current_month, 0) - market_counts.get(previous_month, 0)) / market_counts.get(previous_month, 0)) * 100,
+                    2,
+                ) if market_counts.get(previous_month, 0) else (100.0 if market_counts.get(current_month, 0) else 0.0),
             },
             {
                 "label": "Average annual salary",
-                "value": int(totals["avg_salary"]) if totals["avg_salary"] else None,
+                "value": int(sum(salary_midpoints) / len(salary_midpoints)) if salary_midpoints else None,
                 "delta": salary_change_pct,
             },
         ]
 
         return {
             "headline_metrics": {
-                "total_jobs": totals["total_jobs"],
-                "current_month_jobs": current_jobs,
-                "unique_companies": totals["unique_companies"],
-                "unique_skills": len(self.get_all_unique_skills()),
-                "avg_salary_annual": int(totals["avg_salary"]) if totals["avg_salary"] else None,
+                "total_jobs": len(rows),
+                "current_month_jobs": market_counts.get(current_month, 0),
+                "unique_companies": len(unique_companies),
+                "unique_skills": len(unique_skills),
+                "avg_salary_annual": int(sum(salary_midpoints) / len(salary_midpoints)) if salary_midpoints else None,
             },
             "rising_skills": rising_skills,
             "rising_companies": rising_companies,

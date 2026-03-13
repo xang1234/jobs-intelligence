@@ -1,7 +1,8 @@
 from pathlib import Path
+from unittest.mock import patch
 
 from src.mcf.database import MCFDatabase
-from src.mcf.embeddings import SemanticSearchEngine, SearchRequest
+from src.mcf.embeddings import JobResult, SearchRequest, SearchResponse, SemanticSearchEngine
 
 from .factories import generate_metadata, generate_test_job
 
@@ -97,6 +98,48 @@ def test_role_trend_uses_annual_salary_median(empty_db: MCFDatabase):
     assert latest["market_share"] == 100.0
 
 
+def test_company_trend_top_skills_include_cluster_id(empty_db: MCFDatabase):
+    _insert_job(
+        empty_db,
+        title="Data Scientist",
+        company_name="Insight Labs",
+        skills=["Python", "SQL"],
+        posted_days_ago=2,
+        salary_min=10000,
+        salary_max=14000,
+    )
+
+    trend = empty_db.get_company_trend("Insight Labs", months=3)
+
+    assert trend["top_skills_by_month"]
+    latest_skills = next(item for item in trend["top_skills_by_month"] if item["skills"])
+    assert latest_skills["skills"][0]["cluster_id"] is None
+
+
+def test_overview_avoids_nested_trend_queries(empty_db: MCFDatabase):
+    for idx in range(12):
+        _insert_job(
+            empty_db,
+            title=f"Engineer {idx}",
+            company_name=f"Company {idx % 3}",
+            skills=["Python", "SQL", "Machine Learning"],
+            posted_days_ago=idx * 2,
+            salary_min=9000 + idx * 100,
+            salary_max=12000 + idx * 100,
+        )
+
+    with patch.object(empty_db, "get_skill_trends", side_effect=AssertionError("should not be called")), patch.object(
+        empty_db,
+        "get_company_trend",
+        side_effect=AssertionError("should not be called"),
+    ):
+        overview = empty_db.get_overview(months=3)
+
+    assert overview["headline_metrics"]["total_jobs"] == 12
+    assert overview["rising_skills"]
+    assert overview["rising_companies"]
+
+
 def test_search_results_include_explanations(temp_dir: Path, empty_db: MCFDatabase):
     _insert_job(
         empty_db,
@@ -165,3 +208,54 @@ def test_profile_match_returns_fit_breakdown(temp_dir: Path, empty_db: MCFDataba
     assert top.explanations.skill_overlap_score is not None
     assert top.explanations.overall_fit is not None
     assert "Python" in top.matched_skills
+
+
+def test_profile_match_degraded_mode_uses_fallback_relevance(temp_dir: Path, empty_db: MCFDatabase):
+    higher_relevance = generate_test_job(
+        title="Analytics Specialist",
+        company_name="Signal Corp",
+        skills=["Java"],
+    )
+    lower_relevance = generate_test_job(
+        title="Analytics Specialist",
+        company_name="Signal Corp",
+        skills=["Java"],
+    )
+    empty_db.upsert_job(higher_relevance)
+    empty_db.upsert_job(lower_relevance)
+
+    engine = SemanticSearchEngine(
+        db_path=str(empty_db.db_path),
+        index_dir=temp_dir / "missing-indexes",
+    )
+    engine.load()
+
+    fallback = SearchResponse(
+        results=[
+            JobResult(
+                uuid=lower_relevance.uuid,
+                title=lower_relevance.title,
+                company_name=lower_relevance.company_name,
+                description=lower_relevance.description_text,
+                similarity_score=0.2,
+            ),
+            JobResult(
+                uuid=higher_relevance.uuid,
+                title=higher_relevance.title,
+                company_name=higher_relevance.company_name,
+                description=higher_relevance.description_text,
+                similarity_score=0.9,
+            ),
+        ],
+        total_candidates=2,
+        degraded=True,
+    )
+
+    with patch.object(engine, "_keyword_fallback_search", return_value=fallback):
+        result = engine.match_profile(
+            profile_text="Generalist profile without explicit tracked skills.",
+            limit=2,
+        )
+
+    assert result["results"][0].uuid == higher_relevance.uuid
+    assert result["results"][0].bm25_score == 0.9
