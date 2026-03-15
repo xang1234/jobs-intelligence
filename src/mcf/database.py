@@ -225,23 +225,31 @@ class MCFDatabase:
         jobs = db.search_jobs(company_name="Google")
     """
 
-    def __init__(self, db_path: str = "data/mcf_jobs.db"):
+    def __init__(self, db_path: str = "data/mcf_jobs.db", read_only: bool = False):
         """
         Initialize database connection.
 
         Args:
             db_path: Path to SQLite database file
+            read_only: Open the database without schema writes
         """
         self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._ensure_schema()
+        self.read_only = read_only
+        if not self.read_only:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._ensure_schema()
 
     def _connect(self, write_optimized: bool = False) -> sqlite3.Connection:
         """Create a configured SQLite connection."""
-        conn = sqlite3.connect(str(self.db_path))
+        if self.read_only:
+            conn = sqlite3.connect(f"{self.db_path.resolve().as_uri()}?mode=ro", uri=True)
+        else:
+            conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA busy_timeout = 5000")
+        if self.read_only:
+            conn.execute("PRAGMA query_only = ON")
 
         if write_optimized:
             conn.execute("PRAGMA journal_mode = WAL")
@@ -256,9 +264,11 @@ class MCFDatabase:
         conn = self._connect()
         try:
             yield conn
-            conn.commit()
+            if not self.read_only:
+                conn.commit()
         except Exception:
-            conn.rollback()
+            if not self.read_only:
+                conn.rollback()
             raise
         finally:
             conn.close()

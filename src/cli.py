@@ -332,7 +332,7 @@ def list_jobs(
         mcf list --company Google --salary-min 8000
         mcf list --employment-type "Full Time"
     """
-    db = MCFDatabase(db_path)
+    db = MCFDatabase(db_path, read_only=True)
 
     jobs = db.search_jobs(
         company_name=company,
@@ -386,7 +386,7 @@ def search(
         mcf search "Python" --field skills
         mcf search "Senior" --field title --limit 50
     """
-    db = MCFDatabase(db_path)
+    db = MCFDatabase(db_path, read_only=True)
 
     jobs = db.search_jobs(keyword=keyword, limit=limit)
 
@@ -422,7 +422,7 @@ def stats(
     """
     Show database statistics.
     """
-    db = MCFDatabase(db_path)
+    db = MCFDatabase(db_path, read_only=True)
     stats_data = db.get_stats()
 
     console.print("\n[bold blue]Database Statistics[/bold blue]\n")
@@ -470,7 +470,7 @@ def export(
         mcf export high_salary.csv --salary-min 10000
         mcf export google_jobs.csv --company Google
     """
-    db = MCFDatabase(db_path)
+    db = MCFDatabase(db_path, read_only=True)
 
     count = db.export_to_csv(
         output,
@@ -497,7 +497,7 @@ def history(
     Example:
         mcf history abc123-def456
     """
-    db = MCFDatabase(db_path)
+    db = MCFDatabase(db_path, read_only=True)
 
     # Get current job
     job = db.get_job(uuid)
@@ -549,7 +549,7 @@ def db_status(
     """
     Show status of scrape sessions in database.
     """
-    db = MCFDatabase(db_path)
+    db = MCFDatabase(db_path, read_only=True)
     sessions = db.get_all_sessions()
 
     if not sessions:
@@ -638,7 +638,7 @@ def migrate(
     console.print()
 
     # Get initial stats
-    db = MCFDatabase(db_path)
+    db = MCFDatabase(db_path, read_only=True)
     initial_count = db.count_jobs()
     console.print(f"Jobs in database before migration: [cyan]{initial_count:,}[/cyan]")
     console.print()
@@ -910,7 +910,7 @@ def historical_status(
     Displays progress for each year being scraped, including jobs found,
     not found, and current sequence position.
     """
-    db = MCFDatabase(db_path)
+    db = MCFDatabase(db_path, read_only=True)
 
     # Get sessions
     sessions = db.get_all_historical_sessions()
@@ -1052,10 +1052,9 @@ def daemon_cmd(
     """
     setup_logging(verbose)
 
-    db = MCFDatabase(db_path)
-    daemon = ScraperDaemon(db)
-
     if action == "status":
+        db = MCFDatabase(db_path, read_only=True)
+        daemon = ScraperDaemon(db)
         status = daemon.status()
 
         console.print("\n[bold blue]Daemon Status[/bold blue]\n")
@@ -1080,6 +1079,8 @@ def daemon_cmd(
             console.print(f"Started at: {status['started_at']}")
 
     elif action == "start":
+        db = MCFDatabase(db_path)
+        daemon = ScraperDaemon(db)
         if not year and not all_years:
             console.print("[red]Error: Must specify --year or --all for start action[/red]")
             raise typer.Exit(1)
@@ -1119,6 +1120,8 @@ def daemon_cmd(
             raise typer.Exit(1)
 
     elif action == "stop":
+        db = MCFDatabase(db_path)
+        daemon = ScraperDaemon(db)
         try:
             console.print("Stopping daemon...")
             daemon.stop()
@@ -1195,7 +1198,7 @@ def show_gaps(
         mcf gaps --year 2023     # Check gaps for 2023
         mcf gaps --all           # Check all years
     """
-    db = MCFDatabase(db_path)
+    db = MCFDatabase(db_path, read_only=True)
 
     if not year and not all_years:
         console.print("[red]Error: Must specify --year or --all[/red]")
@@ -1390,7 +1393,7 @@ def attempt_stats(
         mcf attempt-stats              # All years summary
         mcf attempt-stats --year 2023  # Specific year details
     """
-    db = MCFDatabase(db_path)
+    db = MCFDatabase(db_path, read_only=True)
 
     console.print("\n[bold blue]Fetch Attempt Statistics[/bold blue]\n")
 
