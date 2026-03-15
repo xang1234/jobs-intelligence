@@ -225,19 +225,27 @@ class MCFDatabase:
         jobs = db.search_jobs(company_name="Google")
     """
 
-    def __init__(self, db_path: str = "data/mcf_jobs.db", read_only: bool = False):
+    def __init__(
+        self,
+        db_path: str = "data/mcf_jobs.db",
+        read_only: bool = False,
+        ensure_schema: bool = True,
+    ):
         """
         Initialize database connection.
 
         Args:
             db_path: Path to SQLite database file
             read_only: Open the database without schema writes
+            ensure_schema: Create tables and run migrations on open
         """
         self.db_path = Path(db_path)
         self.read_only = read_only
+        self.ensure_schema = ensure_schema
         if not self.read_only:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            self._ensure_schema()
+            if self.ensure_schema:
+                self._ensure_schema()
 
     def _connect(self, write_optimized: bool = False) -> sqlite3.Connection:
         """Create a configured SQLite connection."""
@@ -257,6 +265,22 @@ class MCFDatabase:
             conn.execute("PRAGMA temp_store = MEMORY")
 
         return conn
+
+    @staticmethod
+    def can_acquire_write_lock(db_path: str, timeout_ms: int = 1000) -> bool:
+        """Check whether a new writer can acquire the SQLite write lock."""
+        conn = sqlite3.connect(str(Path(db_path)))
+        try:
+            conn.execute(f"PRAGMA busy_timeout = {timeout_ms}")
+            conn.execute("BEGIN IMMEDIATE")
+            conn.rollback()
+            return True
+        except sqlite3.OperationalError as exc:
+            if "locked" in str(exc).lower():
+                return False
+            raise
+        finally:
+            conn.close()
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:

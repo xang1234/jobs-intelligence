@@ -60,6 +60,30 @@ class TestDatabaseCreation:
 
         assert expected_tables.issubset(table_names)
 
+    def test_can_skip_schema_initialization(self, temp_dir: Path, monkeypatch: pytest.MonkeyPatch):
+        """Existing DB handles can be opened without running schema setup."""
+        db_path = temp_dir / "test.db"
+        db_path.touch()
+
+        def fail_schema(self):
+            raise AssertionError("schema setup should be skipped")
+
+        monkeypatch.setattr(MCFDatabase, "_ensure_schema", fail_schema)
+
+        db = MCFDatabase(str(db_path), ensure_schema=False)
+
+        assert db.db_path == db_path
+
+    def test_can_acquire_write_lock_detects_busy_database(self, temp_db_path: Path):
+        """Write-lock probe should fail while another connection holds the writer lock."""
+        conn = MCFDatabase(str(temp_db_path))._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            assert MCFDatabase.can_acquire_write_lock(str(temp_db_path), timeout_ms=10) is False
+        finally:
+            conn.rollback()
+            conn.close()
+
 
 class TestJobUpsert:
     """Tests for job insert and update operations."""

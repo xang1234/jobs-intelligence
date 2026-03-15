@@ -10,6 +10,7 @@ Usage:
 
 import asyncio
 import logging
+import sqlite3
 import sys
 from pathlib import Path
 from typing import Optional
@@ -1079,11 +1080,15 @@ def daemon_cmd(
             console.print(f"Started at: {status['started_at']}")
 
     elif action == "start":
-        db = MCFDatabase(db_path)
-        daemon = ScraperDaemon(db)
         if not year and not all_years:
             console.print("[red]Error: Must specify --year or --all for start action[/red]")
             raise typer.Exit(1)
+        if not MCFDatabase.can_acquire_write_lock(db_path):
+            console.print("[red]Database is busy: another process is writing to it[/red]")
+            console.print("Stop the other scrape process before starting the daemon.")
+            raise typer.Exit(1)
+        db = MCFDatabase(db_path, read_only=True)
+        daemon = ScraperDaemon(db)
 
         try:
             console.print("\n[bold blue]Starting Daemon[/bold blue]")
@@ -1120,7 +1125,7 @@ def daemon_cmd(
             raise typer.Exit(1)
 
     elif action == "stop":
-        db = MCFDatabase(db_path)
+        db = MCFDatabase(db_path, read_only=True)
         daemon = ScraperDaemon(db)
         try:
             console.print("Stopping daemon...")
@@ -1150,7 +1155,13 @@ def daemon_worker(
     wake_threshold: int = typer.Option(DEFAULT_WAKE_THRESHOLD, "--wake-threshold"),
 ) -> None:
     """Internal: daemon worker process. Do not call directly."""
-    db = MCFDatabase(db_path)
+    db_exists = Path(db_path).exists()
+    try:
+        db = MCFDatabase(db_path)
+    except sqlite3.OperationalError as exc:
+        if not db_exists or "locked" not in str(exc).lower():
+            raise
+        db = MCFDatabase(db_path, ensure_schema=False)
     daemon = ScraperDaemon(
         db,
         pidfile=pidfile,
