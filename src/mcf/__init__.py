@@ -29,6 +29,7 @@ from .daemon import (
 from .database import MCFDatabase
 from .embeddings import EmbeddingGenerator, EmbeddingStats, SkillClusterResult
 from .historical_scraper import YEAR_ESTIMATES, HistoricalScraper, ScrapeProgress
+from .market_stats import MarketAggregate, MarketStatsCache, MarketStatsSnapshot
 from .migration import LegacyJobParser, MCFMigrator, MigrationStats
 from .models import Job, JobSearchResponse
 from .scraper import MCFScraper
@@ -53,6 +54,9 @@ __all__ = [
     "MCFMigrator",
     "MigrationStats",
     "LegacyJobParser",
+    "MarketStatsCache",
+    "MarketStatsSnapshot",
+    "MarketAggregate",
     # Robust pipeline components
     "BatchLogger",
     "AdaptiveRateLimiter",
