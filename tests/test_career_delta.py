@@ -64,7 +64,7 @@ class TestCareerDeltaEngine:
         assert response.summaries == ()
         assert response.filtered_scenarios == ()
         assert response.degraded is True
-        assert response.thin_market is True
+        assert response.thin_market is False
 
     def test_engine_is_not_degraded_when_dependencies_are_supplied(self):
         dependencies = CareerDeltaDependencies(

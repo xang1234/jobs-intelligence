@@ -18,6 +18,9 @@ class TestCategoryNormalization:
             "data science",
         ]
 
+    def test_compound_category_with_and_stays_intact(self):
+        assert normalize_categories(["Research and Development"]) == ["research and development"]
+
     def test_unknown_categories_are_preserved_but_not_forced(self):
         classification = classify_industry(["Space Policy"])
 
@@ -76,6 +79,11 @@ class TestTitleNormalization:
         family = normalize_title_family("Senior Software Engineer II")
 
         assert family.canonical == "software-engineer"
+
+    def test_manager_titles_keep_role_anchor(self):
+        family = normalize_title_family("Lead Product Manager")
+
+        assert family.canonical == "product-manager"
 
     def test_obvious_variants_group_together(self):
         assert is_same_role("Backend Developer", "Back-End Engineer") is True

@@ -27,11 +27,11 @@ COMPANY_DOMINANT_MIN_COUNT = 3
 COMPANY_DOMINANT_MIN_SHARE = 0.6
 SKILL_AFFINITY_MIN_MATCHES = 2
 
-_CATEGORY_SPLIT_RE = re.compile(r"\s*(?:[;/|]|,|\band\b)\s*", re.IGNORECASE)
+_CATEGORY_SPLIT_RE = re.compile(r"\s*(?:[;/|]|,)\s*", re.IGNORECASE)
 _NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 _SENIORITY_RE = re.compile(
     r"\b("
-    r"senior|sr|junior|jr|lead|principal|staff|head|chief|director|manager|"
+    r"senior|sr|junior|jr|principal|staff|head|chief|director|"
     r"assistant|associate|intern|trainee|entry[\s-]*level|mid[\s-]*level|"
     r"ii|iii|iv|v"
     r")\b",
@@ -291,12 +291,13 @@ def infer_company_dominant_industry(
 def normalize_title_family(title: str) -> TitleFamily:
     """Normalize noisy titles into stable role families."""
     normalized = _slugify(title)
-    normalized = _SENIORITY_RE.sub(" ", normalized)
-    normalized = re.sub(r"\s+", " ", normalized).strip()
 
     for pattern, tokens in _CANONICAL_TITLE_PATTERNS:
         if pattern.search(normalized):
             return TitleFamily(canonical="-".join(tokens), tokens=tokens)
+
+    normalized = _SENIORITY_RE.sub(" ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
 
     tokens: list[str] = []
     for raw_token in normalized.split():

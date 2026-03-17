@@ -228,16 +228,12 @@ class CareerDeltaEngine:
             )
         )
 
-        thin_market = False
-        if normalized_request.target_titles and self.dependencies.market_stats is None:
-            thin_market = True
-
         return CareerDeltaResponse(
             request=normalized_request,
             summaries=(),
             filtered_scenarios=(),
             degraded=degraded,
-            thin_market=thin_market,
+            thin_market=False,
         )
 
 
