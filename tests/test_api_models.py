@@ -26,10 +26,13 @@ from src.api.models import (
 )
 from src.mcf.embeddings.models import (
     CompanySimilarity as InternalCompanySimilarity,
+)
+from src.mcf.embeddings.models import (
     JobResult as InternalJobResult,
+)
+from src.mcf.embeddings.models import (
     SearchResponse as InternalSearchResponse,
 )
-
 
 # =============================================================================
 # SearchRequest Tests
@@ -130,9 +133,7 @@ class TestSimilarJobsRequest:
         assert req.exclude_same_company is False
 
     def test_to_internal(self):
-        req = SimilarJobsRequest(
-            job_uuid="abc-123", limit=5, exclude_same_company=True
-        )
+        req = SimilarJobsRequest(job_uuid="abc-123", limit=5, exclude_same_company=True)
         internal = req.to_internal()
         assert internal.job_uuid == "abc-123"
         assert internal.limit == 5
@@ -295,9 +296,7 @@ class TestSearchResponse:
         assert resp.cache_hit is True
 
     def test_defaults(self):
-        resp = SearchResponse(
-            results=[], total_candidates=0, search_time_ms=1.0
-        )
+        resp = SearchResponse(results=[], total_candidates=0, search_time_ms=1.0)
         assert resp.degraded is False
         assert resp.cache_hit is False
         assert resp.query_expansion is None
@@ -439,7 +438,5 @@ class TestErrorResponse:
         assert resp.error.details["field"] == "salary_min"
 
     def test_without_details(self):
-        resp = ErrorResponse(
-            error=ErrorDetail(code="NOT_FOUND", message="Job not found")
-        )
+        resp = ErrorResponse(error=ErrorDetail(code="NOT_FOUND", message="Job not found"))
         assert resp.error.details is None

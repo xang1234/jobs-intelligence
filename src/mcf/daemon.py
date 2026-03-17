@@ -19,7 +19,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Awaitable, Any
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 if TYPE_CHECKING:
     from .database import MCFDatabase
@@ -33,16 +33,19 @@ DEFAULT_WAKE_THRESHOLD = 300  # 5 minutes - gap indicates sleep/wake
 
 class DaemonError(Exception):
     """Base exception for daemon errors."""
+
     pass
 
 
 class DaemonAlreadyRunning(DaemonError):
     """Raised when trying to start a daemon that's already running."""
+
     pass
 
 
 class DaemonNotRunning(DaemonError):
     """Raised when trying to stop a daemon that's not running."""
+
     pass
 
 
@@ -209,15 +212,26 @@ class ScraperDaemon:
 
         # Build command for the worker subprocess
         cmd = [
-            sys.executable, "-m", "src.cli", "_daemon-worker",
-            "--db", db_path,
-            "--rate-limit", str(rate_limit),
-            "--max-rate-limit-retries", str(max_rate_limit_retries),
-            "--cooldown-seconds", str(cooldown_seconds),
-            "--pidfile", str(self.pidfile),
-            "--logfile", str(self.logfile),
-            "--heartbeat-interval", str(self.heartbeat_interval),
-            "--wake-threshold", str(self.wake_threshold),
+            sys.executable,
+            "-m",
+            "src.cli",
+            "_daemon-worker",
+            "--db",
+            db_path,
+            "--rate-limit",
+            str(rate_limit),
+            "--max-rate-limit-retries",
+            str(max_rate_limit_retries),
+            "--cooldown-seconds",
+            str(cooldown_seconds),
+            "--pidfile",
+            str(self.pidfile),
+            "--logfile",
+            str(self.logfile),
+            "--heartbeat-interval",
+            str(self.heartbeat_interval),
+            "--wake-threshold",
+            str(self.wake_threshold),
         ]
         cmd.append("--discover-bounds" if discover_bounds else "--no-discover-bounds")
         if year is not None:
@@ -226,7 +240,7 @@ class ScraperDaemon:
             cmd.append("--all")
 
         # Open log file for subprocess stdout/stderr
-        log_fd = open(self.logfile, 'a')
+        log_fd = open(self.logfile, "a")
 
         # Launch subprocess in new session (detached from terminal)
         proc = subprocess.Popen(
@@ -255,16 +269,14 @@ class ScraperDaemon:
         """
         # Set up logging to file
         file_handler = logging.FileHandler(self.logfile)
-        file_handler.setFormatter(
-            logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        )
+        file_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
         logging.root.addHandler(file_handler)
         logging.root.setLevel(logging.INFO)
 
         logger.info(f"Daemon worker started with PID {os.getpid()}")
 
         # Update database state
-        self.db.update_daemon_state(os.getpid(), 'running')
+        self.db.update_daemon_state(os.getpid(), "running")
 
         # Set up signal handlers
         signal.signal(signal.SIGTERM, self._signal_handler)
@@ -294,18 +306,14 @@ class ScraperDaemon:
 
                 if gap > self.wake_threshold:
                     logger.warning(
-                        f"Wake detected: {gap:.0f}s gap (threshold: {self.wake_threshold}s). "
-                        "Resuming scrape..."
+                        f"Wake detected: {gap:.0f}s gap (threshold: {self.wake_threshold}s). " "Resuming scrape..."
                     )
 
                 last_beat = now
                 self.db.update_daemon_heartbeat()
 
                 try:
-                    await asyncio.wait_for(
-                        should_stop.wait(),
-                        timeout=self.heartbeat_interval
-                    )
+                    await asyncio.wait_for(should_stop.wait(), timeout=self.heartbeat_interval)
                 except asyncio.TimeoutError:
                     pass  # Expected - continue heartbeat loop
 
@@ -330,7 +338,7 @@ class ScraperDaemon:
     def _cleanup(self):
         """Clean up daemon state."""
         try:
-            self.db.update_daemon_state(os.getpid(), 'stopped')
+            self.db.update_daemon_state(os.getpid(), "stopped")
         except Exception as e:
             logger.error(f"Failed to update daemon state: {e}")
 

@@ -20,7 +20,6 @@ from src.mcf.database import MCFDatabase
 from tests.conftest import requires_faiss
 from tests.factories import generate_company_job_set
 
-
 # =============================================================================
 # Fixtures
 # =============================================================================
@@ -117,6 +116,7 @@ class TestGetAllCompanies:
 
         # Insert a job with a company
         from tests.factories import generate_test_job
+
         job = generate_test_job(company_name="Real Company")
         db.upsert_job(job)
 
@@ -303,17 +303,15 @@ class TestHasCompanyIndex:
 class TestFindSimilarCompaniesMultiCentroid:
     """Tests for SemanticSearchEngine.find_similar_companies() with company index."""
 
-    def test_uses_company_index_when_available(
-        self, temp_dir, db_with_companies, company_centroids
-    ):
+    def test_uses_company_index_when_available(self, temp_dir, db_with_companies, company_centroids):
         """
         When company index is available, find_similar_companies uses
         multi-centroid matching instead of on-the-fly computation.
         """
         from src.mcf.embeddings import (
+            CompanySimilarityRequest,
             FAISSIndexManager,
             SemanticSearchEngine,
-            CompanySimilarityRequest,
         )
 
         # Build indexes
@@ -351,14 +349,12 @@ class TestFindSimilarCompaniesMultiCentroid:
             assert r.similarity_score > -1.0  # Cosine sim range
             assert r.job_count > 0
 
-    def test_excludes_source_company(
-        self, temp_dir, db_with_companies, company_centroids
-    ):
+    def test_excludes_source_company(self, temp_dir, db_with_companies, company_centroids):
         """Source company is excluded from results."""
         from src.mcf.embeddings import (
+            CompanySimilarityRequest,
             FAISSIndexManager,
             SemanticSearchEngine,
-            CompanySimilarityRequest,
         )
 
         index_dir = temp_dir / "indexes"
@@ -377,9 +373,7 @@ class TestFindSimilarCompaniesMultiCentroid:
         engine.load()
 
         for company in ["Google Asia Pacific", "Meta Platforms Singapore", "Amazon Web Services"]:
-            results = engine.find_similar_companies(
-                CompanySimilarityRequest(company_name=company, limit=10)
-            )
+            results = engine.find_similar_companies(CompanySimilarityRequest(company_name=company, limit=10))
             result_names = [r.company_name for r in results]
             assert company not in result_names
 
@@ -394,9 +388,9 @@ class TestFindSimilarCompaniesDegraded:
         centroid computation via the jobs index.
         """
         from src.mcf.embeddings import (
+            CompanySimilarityRequest,
             FAISSIndexManager,
             SemanticSearchEngine,
-            CompanySimilarityRequest,
         )
 
         index_dir = temp_dir / "indexes"
@@ -429,8 +423,8 @@ class TestFindSimilarCompaniesDegraded:
     def test_returns_empty_when_fully_degraded(self, temp_dir, db_with_companies):
         """Returns empty list when no indexes are available at all."""
         from src.mcf.embeddings import (
-            SemanticSearchEngine,
             CompanySimilarityRequest,
+            SemanticSearchEngine,
         )
 
         # No indexes built
@@ -443,18 +437,16 @@ class TestFindSimilarCompaniesDegraded:
         )
         engine.load()
 
-        results = engine.find_similar_companies(
-            CompanySimilarityRequest(company_name="Google Asia Pacific", limit=5)
-        )
+        results = engine.find_similar_companies(CompanySimilarityRequest(company_name="Google Asia Pacific", limit=5))
 
         assert results == []
 
     def test_unknown_company_returns_empty(self, temp_dir, db_with_companies):
         """Returns empty list for company with no jobs."""
         from src.mcf.embeddings import (
+            CompanySimilarityRequest,
             FAISSIndexManager,
             SemanticSearchEngine,
-            CompanySimilarityRequest,
         )
 
         index_dir = temp_dir / "indexes"
@@ -471,9 +463,7 @@ class TestFindSimilarCompaniesDegraded:
         )
         engine.load()
 
-        results = engine.find_similar_companies(
-            CompanySimilarityRequest(company_name="Nonexistent Corp", limit=5)
-        )
+        results = engine.find_similar_companies(CompanySimilarityRequest(company_name="Nonexistent Corp", limit=5))
 
         assert results == []
 
@@ -496,10 +486,9 @@ class TestGenerateAllIncludesCompanies:
         mock_embeddings = np.random.randn(384).astype(np.float32)
         mock_embeddings = mock_embeddings / np.linalg.norm(mock_embeddings)
 
-        with patch.object(generator, '_model') as mock_model:
+        with patch.object(generator, "_model") as mock_model:
             mock_model.encode = lambda text, **kwargs: (
-                mock_embeddings if isinstance(text, str)
-                else np.tile(mock_embeddings, (len(text), 1))
+                mock_embeddings if isinstance(text, str) else np.tile(mock_embeddings, (len(text), 1))
             )
             # Directly set the model so the property doesn't re-load
             generator._model = mock_model

@@ -65,9 +65,7 @@ class QueryExpander:
         self.skill_to_cluster = skill_to_cluster
 
         # Build reverse lookup for fast case-insensitive matching
-        self._skill_lower_map: dict[str, str] = {
-            s.lower(): s for s in skill_to_cluster.keys()
-        }
+        self._skill_lower_map: dict[str, str] = {s.lower(): s for s in skill_to_cluster.keys()}
 
         # Precompute acronyms for quick lookup
         self._acronym_map: dict[str, str] = {}
@@ -77,8 +75,7 @@ class QueryExpander:
                 self._acronym_map[acronym] = skill
 
         logger.debug(
-            f"Initialized QueryExpander with {len(skill_to_cluster)} skills "
-            f"in {len(skill_clusters)} clusters"
+            f"Initialized QueryExpander with {len(skill_to_cluster)} skills " f"in {len(skill_clusters)} clusters"
         )
 
     @classmethod
@@ -104,15 +101,11 @@ class QueryExpander:
         mapping_path = index_dir / "skill_to_cluster.pkl"
 
         if not clusters_path.exists():
-            raise FileNotFoundError(
-                f"Skill clusters not found at {clusters_path}. "
-                f"Run 'mcf embed-generate' first."
-            )
+            raise FileNotFoundError(f"Skill clusters not found at {clusters_path}. " f"Run 'mcf embed-generate' first.")
 
         if not mapping_path.exists():
             raise FileNotFoundError(
-                f"Skill-to-cluster mapping not found at {mapping_path}. "
-                f"Run 'mcf embed-generate' first."
+                f"Skill-to-cluster mapping not found at {mapping_path}. " f"Run 'mcf embed-generate' first."
             )
 
         with open(clusters_path, "rb") as f:
@@ -121,10 +114,7 @@ class QueryExpander:
         with open(mapping_path, "rb") as f:
             skill_to_cluster = pickle.load(f)
 
-        logger.info(
-            f"Loaded skill clusters: {len(skill_to_cluster)} skills "
-            f"in {len(skill_clusters)} clusters"
-        )
+        logger.info(f"Loaded skill clusters: {len(skill_to_cluster)} skills " f"in {len(skill_clusters)} clusters")
 
         return cls(skill_clusters, skill_to_cluster)
 
@@ -158,17 +148,14 @@ class QueryExpander:
                 related = self.get_related_skills(matching_skill, k=max_expansions)
                 expanded.extend(related)
 
-                logger.debug(
-                    f"Expanded '{word}' via '{matching_skill}' -> {related}"
-                )
+                logger.debug(f"Expanded '{word}' via '{matching_skill}' -> {related}")
 
         # Deduplicate while preserving order
         result = self._deduplicate(expanded)
 
         if len(result) > len(words):
             logger.info(
-                f"Query expansion: '{query}' -> {len(result)} terms "
-                f"(+{len(result) - len(words)} expansions)"
+                f"Query expansion: '{query}' -> {len(result)} terms " f"(+{len(result) - len(words)} expansions)"
             )
 
         return result
@@ -256,7 +243,7 @@ class QueryExpander:
         if len(word_lower) >= 4:
             for skill_lower, skill in self._skill_lower_map.items():
                 # Check if word appears as a complete word in skill
-                if re.search(rf'\b{re.escape(word_lower)}\b', skill_lower):
+                if re.search(rf"\b{re.escape(word_lower)}\b", skill_lower):
                     return skill
 
         return None
@@ -277,7 +264,7 @@ class QueryExpander:
             List of word tokens
         """
         # Replace punctuation with spaces (except hyphens in compound words)
-        cleaned = re.sub(r'[^\w\s-]', ' ', query)
+        cleaned = re.sub(r"[^\w\s-]", " ", query)
         # Split on whitespace
         words = cleaned.split()
         # Filter empty strings
@@ -325,7 +312,7 @@ class QueryExpander:
         words = skill.split()
         if len(words) < 2:
             return ""
-        return ''.join(w[0] for w in words if w).upper()
+        return "".join(w[0] for w in words if w).upper()
 
     def get_stats(self) -> dict:
         """
@@ -339,9 +326,7 @@ class QueryExpander:
         return {
             "total_skills": len(self.skill_to_cluster),
             "total_clusters": len(self.skill_clusters),
-            "avg_cluster_size": (
-                sum(cluster_sizes) / len(cluster_sizes) if cluster_sizes else 0
-            ),
+            "avg_cluster_size": (sum(cluster_sizes) / len(cluster_sizes) if cluster_sizes else 0),
             "max_cluster_size": max(cluster_sizes) if cluster_sizes else 0,
             "acronyms_indexed": len(self._acronym_map),
         }

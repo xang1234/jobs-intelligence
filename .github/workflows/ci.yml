@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-fast:
+    name: Backend (fast)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Cache Poetry venv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pypoetry
+          key: poetry-fast-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
+          restore-keys: poetry-fast-${{ runner.os }}-
+
+      - name: Install dependencies (without ML)
+        run: poetry install --without ml
+
+      - name: Lint (ruff)
+        run: |
+          poetry run ruff check src/ tests/
+          poetry run ruff format --check src/ tests/
+
+      - name: Smoke test CLI
+        run: poetry run python -m src.cli --help
+
+      - name: Run tests (non-ML)
+        run: |
+          poetry run pytest \
+            --ignore=tests/test_index_manager.py \
+            --ignore=tests/test_search_engine.py \
+            --ignore=tests/test_query_expander.py \
+            --ignore=tests/test_company_centroids.py \
+            --ignore=tests/test_market_intelligence.py \
+            -x -q
+
+  backend-heavy:
+    name: Backend (ML)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Cache Poetry venv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pypoetry
+          key: poetry-heavy-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
+          restore-keys: poetry-heavy-${{ runner.os }}-
+
+      - name: Install CPU-only PyTorch
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install dependencies (all including ML)
+        run: poetry install --with ml
+
+      - name: Run ML tests
+        run: |
+          poetry run pytest \
+            tests/test_index_manager.py \
+            tests/test_search_engine.py \
+            tests/test_query_expander.py \
+            tests/test_company_centroids.py \
+            tests/test_market_intelligence.py \
+            -x -q
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: src/frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: src/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npx tsc -b --noEmit
+
+      - name: Build
+        run: npx vite build

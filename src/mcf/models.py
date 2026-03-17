@@ -5,19 +5,22 @@ These models provide type validation and automatic conversion for the JSON
 data returned by the MCF API, ensuring data integrity and enabling IDE support.
 """
 
+import re
 from datetime import date, datetime
 from typing import Optional
-from pydantic import BaseModel, Field, field_validator, computed_field
-import re
+
+from pydantic import BaseModel, Field, computed_field
 
 
 class SalaryType(BaseModel):
     """Salary type information (Monthly, Yearly, Hourly, etc.)"""
+
     salaryType: Optional[str] = None
 
 
 class Salary(BaseModel):
     """Salary range information with type."""
+
     minimum: Optional[int] = Field(default=None, alias="minimum")
     maximum: Optional[int] = Field(default=None, alias="maximum")
     type: Optional[SalaryType] = None
@@ -32,6 +35,7 @@ class Salary(BaseModel):
 
 class Company(BaseModel):
     """Company information from the job posting."""
+
     name: str = ""
     uen: Optional[str] = None
     description: Optional[str] = None
@@ -40,18 +44,21 @@ class Company(BaseModel):
 
 class Skill(BaseModel):
     """Skill requirement for a job."""
+
     skill: str
     isKeySkill: Optional[bool] = False
 
 
 class Category(BaseModel):
     """Job category/classification."""
+
     category: str
     id: Optional[int] = None
 
 
 class Address(BaseModel):
     """Location/address information."""
+
     block: Optional[str] = None
     street: Optional[str] = None
     floor: Optional[str] = None
@@ -77,16 +84,19 @@ class Address(BaseModel):
 
 class EmploymentType(BaseModel):
     """Employment type information."""
+
     employmentType: str = "Unknown"
 
 
 class PositionLevel(BaseModel):
     """Position level/seniority information."""
+
     position: str = "Unknown"
 
 
 class JobMetadata(BaseModel):
     """Metadata about the job posting."""
+
     totalNumberJobApplication: int = 0
     expiryDate: Optional[str] = None
     newPostingDate: Optional[str] = None
@@ -101,6 +111,7 @@ class Job(BaseModel):
     This model maps the API response to a structured object with
     proper types and computed fields for easy data access.
     """
+
     uuid: str
     title: str
     description: str = ""
@@ -200,9 +211,7 @@ class Job(BaseModel):
         """Get the posting date."""
         if self.metadata and self.metadata.newPostingDate:
             try:
-                return datetime.fromisoformat(
-                    self.metadata.newPostingDate.replace("Z", "+00:00")
-                ).date()
+                return datetime.fromisoformat(self.metadata.newPostingDate.replace("Z", "+00:00")).date()
             except ValueError:
                 return None
         return None
@@ -213,9 +222,7 @@ class Job(BaseModel):
         """Get the expiry date."""
         if self.metadata and self.metadata.expiryDate:
             try:
-                return datetime.fromisoformat(
-                    self.metadata.expiryDate.replace("Z", "+00:00")
-                ).date()
+                return datetime.fromisoformat(self.metadata.expiryDate.replace("Z", "+00:00")).date()
             except ValueError:
                 return None
         return None
@@ -231,7 +238,7 @@ class Job(BaseModel):
     def job_url(self) -> str:
         """Construct the URL to view this job on MCF."""
         # URL format: https://www.mycareersfuture.gov.sg/job/{slug}-{uuid}
-        slug = re.sub(r'[^a-z0-9]+', '-', self.title.lower()).strip('-')
+        slug = re.sub(r"[^a-z0-9]+", "-", self.title.lower()).strip("-")
         return f"https://www.mycareersfuture.gov.sg/job/{slug}-{self.uuid}"
 
     @computed_field
@@ -239,8 +246,8 @@ class Job(BaseModel):
     def description_text(self) -> str:
         """Get description with HTML tags stripped."""
         # Simple HTML tag removal - handles most cases
-        text = re.sub(r'<[^>]+>', ' ', self.description)
-        text = re.sub(r'\s+', ' ', text)
+        text = re.sub(r"<[^>]+>", " ", self.description)
+        text = re.sub(r"\s+", " ", text)
         return text.strip()
 
     def to_flat_dict(self) -> dict:
@@ -275,6 +282,7 @@ class Job(BaseModel):
 
 class JobSearchResponse(BaseModel):
     """Response from the MCF job search API endpoint."""
+
     results: list[Job] = Field(default_factory=list)
     total: int = 0
 
@@ -285,6 +293,7 @@ class JobSearchResponse(BaseModel):
 
 class Checkpoint(BaseModel):
     """Checkpoint for resumable scraping."""
+
     search_query: str
     total_jobs: int
     fetched_count: int

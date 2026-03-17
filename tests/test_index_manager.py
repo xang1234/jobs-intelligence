@@ -16,7 +16,6 @@ import pytest
 
 from tests.conftest import requires_faiss
 
-
 # =============================================================================
 # Fixtures
 # =============================================================================
@@ -58,8 +57,18 @@ def small_embeddings():
 def skill_embeddings():
     """Generate skill embeddings for testing."""
     np.random.seed(456)
-    skills = ["Python", "Java", "JavaScript", "SQL", "Machine Learning",
-              "Data Analysis", "AWS", "Docker", "Kubernetes", "React"]
+    skills = [
+        "Python",
+        "Java",
+        "JavaScript",
+        "SQL",
+        "Machine Learning",
+        "Data Analysis",
+        "AWS",
+        "Docker",
+        "Kubernetes",
+        "React",
+    ]
     n = len(skills)
     embeddings = np.random.randn(n, 384).astype(np.float32)
     norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
@@ -397,9 +406,7 @@ class TestPersistence:
 
         assert results1 == results2
 
-    def test_save_and_load_all_indexes(
-        self, temp_index_dir, sample_embeddings, skill_embeddings, company_centroids
-    ):
+    def test_save_and_load_all_indexes(self, temp_index_dir, sample_embeddings, skill_embeddings, company_centroids):
         """Test saving and loading all index types."""
         from src.mcf.embeddings import FAISSIndexManager
 

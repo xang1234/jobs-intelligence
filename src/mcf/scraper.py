@@ -11,13 +11,12 @@ Coordinates the API client and storage layer with:
 import asyncio
 import logging
 import signal
-from datetime import datetime
-from typing import Callable, Optional
+from typing import Optional
 
 from rich.progress import Progress, TaskID
 
-from .api_client import MCFClient, MCFAPIError, MCFRateLimitError
-from .models import Job, Checkpoint
+from .api_client import MCFAPIError, MCFClient, MCFRateLimitError
+from .models import Checkpoint, Job
 from .storage import JobStorage, SQLiteStorage
 
 logger = logging.getLogger(__name__)
@@ -121,10 +120,7 @@ class MCFScraper:
             if checkpoint:
                 start_offset = checkpoint.current_offset
                 existing_uuids = set(checkpoint.job_uuids)
-                logger.info(
-                    f"Resuming from checkpoint: {checkpoint.fetched_count} jobs, "
-                    f"offset {start_offset}"
-                )
+                logger.info(f"Resuming from checkpoint: {checkpoint.fetched_count} jobs, " f"offset {start_offset}")
 
         async with MCFClient(requests_per_second=self.requests_per_second) as client:
             # Get total job count for progress tracking
@@ -172,10 +168,7 @@ class MCFScraper:
                     )
                 except MCFRateLimitError:
                     backoff = 1.0 / self.requests_per_second + 5.0
-                    logger.warning(
-                        f"Rate limited at offset {offset}, "
-                        f"backing off {backoff:.1f}s"
-                    )
+                    logger.warning(f"Rate limited at offset {offset}, " f"backing off {backoff:.1f}s")
                     await asyncio.sleep(backoff)
                     continue
                 except MCFAPIError as e:
@@ -222,7 +215,7 @@ class MCFScraper:
             if self._shutdown_event.is_set():
                 # Save checkpoint on shutdown for resume
                 self.storage.save_checkpoint(checkpoint)
-                logger.info(f"Progress saved. Resume with same query to continue.")
+                logger.info("Progress saved. Resume with same query to continue.")
             else:
                 # Clear checkpoint on successful completion
                 self.storage.clear_checkpoint(query)

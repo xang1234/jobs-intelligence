@@ -14,22 +14,19 @@ Tests cover:
 
 import pickle
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pytest
 
+from src.mcf.database import MCFDatabase
 from src.mcf.embeddings import (
-    SemanticSearchEngine,
+    FAISSIndexManager,
+    JobResult,
     SearchRequest,
     SearchResponse,
-    JobResult,
+    SemanticSearchEngine,
     SimilarJobsRequest,
     SkillSearchRequest,
-    FAISSIndexManager,
 )
-from src.mcf.database import MCFDatabase
-
 
 # =============================================================================
 # Fixtures
@@ -203,21 +200,25 @@ class TestSearchDegradedMode:
     def test_search_with_no_matches(self, search_engine: SemanticSearchEngine):
         """Test search with query that matches nothing."""
         # Use a query unlikely to match anything
-        response = search_engine.search(SearchRequest(
-            query="xyznonexistent123",
-            limit=5,
-        ))
+        response = search_engine.search(
+            SearchRequest(
+                query="xyznonexistent123",
+                limit=5,
+            )
+        )
 
         assert response.degraded is True
         # May still have results from SQL filter if no keyword filter applied
 
     def test_search_with_salary_filter(self, search_engine: SemanticSearchEngine):
         """Test search with salary filter in degraded mode."""
-        response = search_engine.search(SearchRequest(
-            query="engineer",
-            salary_min=5000,
-            limit=10,
-        ))
+        response = search_engine.search(
+            SearchRequest(
+                query="engineer",
+                salary_min=5000,
+                limit=10,
+            )
+        )
 
         # All results should have salary >= 5000
         for result in response.results:
@@ -244,20 +245,24 @@ class TestSearchWithIndexes:
 
     def test_search_returns_results(self, search_engine_with_indexes: SemanticSearchEngine):
         """Test basic search with indexes."""
-        response = search_engine_with_indexes.search(SearchRequest(
-            query="software engineer",
-            limit=5,
-        ))
+        response = search_engine_with_indexes.search(
+            SearchRequest(
+                query="software engineer",
+                limit=5,
+            )
+        )
 
         assert isinstance(response, SearchResponse)
         assert response.degraded is False
 
     def test_search_results_have_scores(self, search_engine_with_indexes: SemanticSearchEngine):
         """Test search results include similarity scores."""
-        response = search_engine_with_indexes.search(SearchRequest(
-            query="python developer",
-            limit=5,
-        ))
+        response = search_engine_with_indexes.search(
+            SearchRequest(
+                query="python developer",
+                limit=5,
+            )
+        )
 
         for result in response.results:
             assert hasattr(result, "similarity_score")
@@ -265,10 +270,12 @@ class TestSearchWithIndexes:
 
     def test_search_results_ordered_by_score(self, search_engine_with_indexes: SemanticSearchEngine):
         """Test search results are ordered by score descending."""
-        response = search_engine_with_indexes.search(SearchRequest(
-            query="data scientist",
-            limit=10,
-        ))
+        response = search_engine_with_indexes.search(
+            SearchRequest(
+                query="data scientist",
+                limit=10,
+            )
+        )
 
         if len(response.results) > 1:
             scores = [r.similarity_score for r in response.results]
@@ -276,20 +283,24 @@ class TestSearchWithIndexes:
 
     def test_search_respects_limit(self, search_engine_with_indexes: SemanticSearchEngine):
         """Test search respects the limit parameter."""
-        response = search_engine_with_indexes.search(SearchRequest(
-            query="engineer",
-            limit=3,
-        ))
+        response = search_engine_with_indexes.search(
+            SearchRequest(
+                query="engineer",
+                limit=3,
+            )
+        )
 
         assert len(response.results) <= 3
 
     def test_search_with_min_similarity(self, search_engine_with_indexes: SemanticSearchEngine):
         """Test search filters by minimum similarity."""
-        response = search_engine_with_indexes.search(SearchRequest(
-            query="data engineer",
-            min_similarity=0.5,
-            limit=20,
-        ))
+        response = search_engine_with_indexes.search(
+            SearchRequest(
+                query="data engineer",
+                min_similarity=0.5,
+                limit=20,
+            )
+        )
 
         for result in response.results:
             assert result.similarity_score >= 0.5
@@ -305,11 +316,13 @@ class TestQueryExpansion:
 
     def test_query_expansion_enabled(self, search_engine_with_indexes: SemanticSearchEngine):
         """Test query expansion happens when enabled."""
-        response = search_engine_with_indexes.search(SearchRequest(
-            query="Python",
-            expand_query=True,
-            limit=5,
-        ))
+        response = search_engine_with_indexes.search(
+            SearchRequest(
+                query="Python",
+                expand_query=True,
+                limit=5,
+            )
+        )
 
         # Query expansion should be present if skill matched
         # (depends on skill_clusters fixture data)
@@ -319,11 +332,13 @@ class TestQueryExpansion:
 
     def test_query_expansion_disabled(self, search_engine_with_indexes: SemanticSearchEngine):
         """Test query expansion can be disabled."""
-        response = search_engine_with_indexes.search(SearchRequest(
-            query="Python",
-            expand_query=False,
-            limit=5,
-        ))
+        response = search_engine_with_indexes.search(
+            SearchRequest(
+                query="Python",
+                expand_query=False,
+                limit=5,
+            )
+        )
 
         assert response.query_expansion is None
 
@@ -381,22 +396,24 @@ class TestFindSimilar:
 
     def test_find_similar_without_indexes(self, search_engine: SemanticSearchEngine):
         """Test find_similar returns empty in degraded mode."""
-        response = search_engine.find_similar(SimilarJobsRequest(
-            job_uuid="nonexistent-uuid",
-            limit=5,
-        ))
+        response = search_engine.find_similar(
+            SimilarJobsRequest(
+                job_uuid="nonexistent-uuid",
+                limit=5,
+            )
+        )
 
         assert response.degraded is True
         assert len(response.results) == 0
 
-    def test_find_similar_with_nonexistent_job(
-        self, search_engine_with_indexes: SemanticSearchEngine
-    ):
+    def test_find_similar_with_nonexistent_job(self, search_engine_with_indexes: SemanticSearchEngine):
         """Test find_similar handles nonexistent job gracefully."""
-        response = search_engine_with_indexes.find_similar(SimilarJobsRequest(
-            job_uuid="nonexistent-uuid-12345",
-            limit=5,
-        ))
+        response = search_engine_with_indexes.find_similar(
+            SimilarJobsRequest(
+                job_uuid="nonexistent-uuid-12345",
+                limit=5,
+            )
+        )
 
         # Should return empty results, not error
         assert len(response.results) == 0
@@ -412,10 +429,12 @@ class TestSearchBySkill:
 
     def test_search_by_skill_degraded(self, search_engine: SemanticSearchEngine):
         """Test skill search falls back to keyword in degraded mode."""
-        response = search_engine.search_by_skill(SkillSearchRequest(
-            skill="Python",
-            limit=5,
-        ))
+        response = search_engine.search_by_skill(
+            SkillSearchRequest(
+                skill="Python",
+                limit=5,
+            )
+        )
 
         assert response.degraded is True
 
@@ -461,15 +480,14 @@ class TestGetStats:
 class TestErrorHandling:
     """Tests for error handling and graceful degradation."""
 
-    def test_handles_index_compatibility_error(
-        self, temp_dir: Path, test_db_with_embeddings: MCFDatabase
-    ):
+    def test_handles_index_compatibility_error(self, temp_dir: Path, test_db_with_embeddings: MCFDatabase):
         """Test engine handles index compatibility errors gracefully."""
         index_dir = temp_dir / "embeddings"
         index_dir.mkdir(parents=True, exist_ok=True)
 
         # Create incompatible metadata
         import pickle
+
         metadata = {"model_version": "incompatible-model"}
         with open(index_dir / "index_metadata.pkl", "wb") as f:
             pickle.dump(metadata, f)
@@ -486,11 +504,13 @@ class TestErrorHandling:
 
     def test_search_handles_empty_results(self, search_engine: SemanticSearchEngine):
         """Test search handles no results gracefully."""
-        response = search_engine.search(SearchRequest(
-            query="test",
-            salary_min=999999999,  # Unrealistic salary to get no results
-            limit=5,
-        ))
+        response = search_engine.search(
+            SearchRequest(
+                query="test",
+                salary_min=999999999,  # Unrealistic salary to get no results
+                limit=5,
+            )
+        )
 
         assert isinstance(response, SearchResponse)
         assert response.results == []
@@ -512,12 +532,14 @@ class TestIntegration:
         assert search_engine_with_indexes._loaded
 
         # Perform search
-        response = search_engine_with_indexes.search(SearchRequest(
-            query="data scientist python",
-            salary_min=4000,
-            limit=10,
-            expand_query=True,
-        ))
+        response = search_engine_with_indexes.search(
+            SearchRequest(
+                query="data scientist python",
+                salary_min=4000,
+                limit=10,
+                expand_query=True,
+            )
+        )
 
         # Verify response structure
         assert isinstance(response, SearchResponse)

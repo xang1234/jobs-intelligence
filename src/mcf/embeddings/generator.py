@@ -16,6 +16,7 @@ import numpy as np
 
 if TYPE_CHECKING:
     from sentence_transformers import SentenceTransformer
+
     from ..database import MCFDatabase
     from ..models import Job
 
@@ -181,10 +182,7 @@ class EmbeddingGenerator:
             batch_size=batch_size,
         )
 
-        return {
-            skill: np.asarray(emb, dtype=np.float32)
-            for skill, emb in zip(skills, embeddings)
-        }
+        return {skill: np.asarray(emb, dtype=np.float32) for skill, emb in zip(skills, embeddings)}
 
     def cluster_skills(
         self,
@@ -552,9 +550,7 @@ class EmbeddingGenerator:
                         db.upsert_embedding(entity_id, "company", centroid, self.model_name)
 
                 stats.companies_processed = len(company_centroids)
-                logger.info(
-                    f"Stored centroids for {len(company_centroids)} companies"
-                )
+                logger.info(f"Stored centroids for {len(company_centroids)} companies")
         except Exception as e:
             logger.warning(f"Company centroid generation failed: {e}")
 
@@ -584,7 +580,6 @@ class EmbeddingGenerator:
             jobs_data: List of job dicts with uuid, title, description, skills
             stats: Stats object to update
         """
-        from ..models import Job
 
         # Convert dict data to minimal Job-like objects for embedding
         # We need: title, description_text, skills_list, categories_list

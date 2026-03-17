@@ -128,10 +128,13 @@ def test_overview_avoids_nested_trend_queries(empty_db: MCFDatabase):
             salary_max=12000 + idx * 100,
         )
 
-    with patch.object(empty_db, "get_skill_trends", side_effect=AssertionError("should not be called")), patch.object(
-        empty_db,
-        "get_company_trend",
-        side_effect=AssertionError("should not be called"),
+    with (
+        patch.object(empty_db, "get_skill_trends", side_effect=AssertionError("should not be called")),
+        patch.object(
+            empty_db,
+            "get_company_trend",
+            side_effect=AssertionError("should not be called"),
+        ),
     ):
         overview = empty_db.get_overview(months=3)
 
@@ -192,9 +195,7 @@ def test_profile_match_returns_fit_breakdown(temp_dir: Path, empty_db: MCFDataba
     )
 
     result = engine.match_profile(
-        profile_text=(
-            "Senior analytics leader with Python, SQL, machine learning, and experimentation experience."
-        ),
+        profile_text=("Senior analytics leader with Python, SQL, machine learning, and experimentation experience."),
         target_titles=["Data Scientist"],
         salary_expectation_annual=180000,
         limit=5,

@@ -17,7 +17,6 @@ import pytest
 
 from src.mcf.embeddings import QueryExpander
 
-
 # =============================================================================
 # Fixtures
 # =============================================================================
@@ -130,20 +129,14 @@ class TestExpand:
 
         # "ML" should match "Machine Learning"
         # So we should see related skills from cluster 1
-        assert any(
-            s in expanded
-            for s in ["Machine Learning", "Deep Learning", "Neural Networks", "TensorFlow"]
-        )
+        assert any(s in expanded for s in ["Machine Learning", "Deep Learning", "Neural Networks", "TensorFlow"])
 
     def test_expand_acronym_ds(self, expander):
         """Test acronym expansion for DS (Data Science)."""
         expanded = expander.expand("DS analyst")
 
         # "DS" should match "Data Science"
-        assert any(
-            s in expanded
-            for s in ["Data Science", "Data Analysis", "Statistics"]
-        )
+        assert any(s in expanded for s in ["Data Science", "Data Analysis", "Statistics"])
 
     def test_expand_preserves_original(self, expander):
         """Test that original words are preserved."""

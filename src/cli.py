@@ -18,33 +18,31 @@ from typing import Optional
 import typer
 from rich.console import Console
 from rich.logging import RichHandler
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 from rich.table import Table
 
 from src.mcf import (
-    MCFClient,
-    MCFScraper,
-    JobStorage,
-    SQLiteStorage,
-    MCFDatabase,
-    MCFMigrator,
-    HistoricalScraper,
-    YEAR_ESTIMATES,
-    ScraperDaemon,
-    DaemonError,
-    DaemonAlreadyRunning,
-    DaemonNotRunning,
     DEFAULT_HEARTBEAT_INTERVAL,
     DEFAULT_WAKE_THRESHOLD,
+    YEAR_ESTIMATES,
+    DaemonAlreadyRunning,
+    DaemonError,
+    DaemonNotRunning,
     EmbeddingGenerator,
     EmbeddingStats,
+    HistoricalScraper,
+    MCFClient,
+    MCFDatabase,
+    MCFMigrator,
+    MCFScraper,
+    ScraperDaemon,
 )
 from src.mcf.embeddings import (
     FAISSIndexManager,
     IndexCompatibilityError,
-    SemanticSearchEngine,
     SearchRequest,
     SearchResponse,
+    SemanticSearchEngine,
 )
 
 app = typer.Typer(
@@ -68,21 +66,11 @@ def setup_logging(verbose: bool = False) -> None:
 @app.command()
 def scrape(
     query: str = typer.Argument(..., help="Search query (e.g., 'data scientist')"),
-    max_jobs: Optional[int] = typer.Option(
-        None, "--max-jobs", "-n", help="Maximum number of jobs to scrape"
-    ),
-    output_dir: str = typer.Option(
-        "data", "--output", "-o", help="Output directory for files"
-    ),
-    format: str = typer.Option(
-        "csv", "--format", "-f", help="Output format: csv or json"
-    ),
-    no_resume: bool = typer.Option(
-        False, "--no-resume", help="Don't resume from previous checkpoint"
-    ),
-    rate_limit: float = typer.Option(
-        2.0, "--rate-limit", "-r", help="Requests per second"
-    ),
+    max_jobs: Optional[int] = typer.Option(None, "--max-jobs", "-n", help="Maximum number of jobs to scrape"),
+    output_dir: str = typer.Option("data", "--output", "-o", help="Output directory for files"),
+    format: str = typer.Option("csv", "--format", "-f", help="Output format: csv or json"),
+    no_resume: bool = typer.Option(False, "--no-resume", help="Don't resume from previous checkpoint"),
+    rate_limit: float = typer.Option(2.0, "--rate-limit", "-r", help="Requests per second"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging"),
 ) -> None:
     """
@@ -95,7 +83,7 @@ def scrape(
     """
     setup_logging(verbose)
 
-    console.print(f"\n[bold blue]MCF Job Scraper[/bold blue]")
+    console.print("\n[bold blue]MCF Job Scraper[/bold blue]")
     console.print(f"Search query: [green]{query}[/green]")
 
     if max_jobs:
@@ -157,15 +145,9 @@ def scrape(
 @app.command()
 def scrape_multi(
     queries: list[str] = typer.Argument(..., help="Search queries to scrape"),
-    max_jobs: Optional[int] = typer.Option(
-        None, "--max-jobs", "-n", help="Maximum jobs per query"
-    ),
-    output_dir: str = typer.Option(
-        "data", "--output", "-o", help="Output directory"
-    ),
-    output_name: str = typer.Option(
-        "jobs", "--name", help="Base name for output file"
-    ),
+    max_jobs: Optional[int] = typer.Option(None, "--max-jobs", "-n", help="Maximum jobs per query"),
+    output_dir: str = typer.Option("data", "--output", "-o", help="Output directory"),
+    output_name: str = typer.Option("jobs", "--name", help="Base name for output file"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Debug logging"),
 ) -> None:
     """
@@ -176,7 +158,7 @@ def scrape_multi(
     """
     setup_logging(verbose)
 
-    console.print(f"\n[bold blue]MCF Multi-Query Scraper[/bold blue]")
+    console.print("\n[bold blue]MCF Multi-Query Scraper[/bold blue]")
     console.print(f"Queries: {', '.join(queries)}")
     console.print()
 
@@ -244,7 +226,7 @@ def status() -> None:
                 try:
                     dt = datetime.fromisoformat(updated)
                     updated = dt.strftime("%Y-%m-%d %H:%M")
-                except:
+                except (ValueError, TypeError):
                     pass
 
             progress_pct = (fetched / total * 100) if total > 0 else 0
@@ -310,6 +292,7 @@ def clear_checkpoints() -> None:
         return
 
     import shutil
+
     shutil.rmtree(checkpoint_dir)
     console.print("[green]All checkpoints cleared[/green]")
 
@@ -569,8 +552,8 @@ def db_status(
 
     for session in sessions[:20]:  # Show last 20
         progress_str = f"{session['fetched_count']}/{session['total_jobs']}"
-        if session['total_jobs'] > 0:
-            pct = session['fetched_count'] / session['total_jobs'] * 100
+        if session["total_jobs"] > 0:
+            pct = session["fetched_count"] / session["total_jobs"] * 100
             progress_str += f" ({pct:.0f}%)"
 
         status_style = {
@@ -595,12 +578,8 @@ def migrate(
     data_dir: str = typer.Option("data", "--data-dir", "-d", help="Data directory"),
     json_only: bool = typer.Option(False, "--json-only", help="Only import JSON files"),
     csv_only: bool = typer.Option(False, "--csv-only", help="Only import CSV files"),
-    skip_link_only: bool = typer.Option(
-        False, "--skip-link-only", help="Skip link-only CSVs (minimal data)"
-    ),
-    dry_run: bool = typer.Option(
-        False, "--dry-run", help="Preview without importing"
-    ),
+    skip_link_only: bool = typer.Option(False, "--skip-link-only", help="Skip link-only CSVs (minimal data)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without importing"),
     db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Database path"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Debug logging"),
 ) -> None:
@@ -704,24 +683,12 @@ def migrate(
 
 @app.command(name="scrape-historical")
 def scrape_historical(
-    year: Optional[int] = typer.Option(
-        None, "--year", "-y", help="Specific year to scrape (2019-2026)"
-    ),
-    all_years: bool = typer.Option(
-        False, "--all", help="Scrape all years (2019-2026)"
-    ),
-    start: Optional[str] = typer.Option(
-        None, "--start", help="Starting jobPostId (e.g., MCF-2023-0500000)"
-    ),
-    end: Optional[str] = typer.Option(
-        None, "--end", help="Ending jobPostId (e.g., MCF-2023-0600000)"
-    ),
-    resume: bool = typer.Option(
-        True, "--resume/--no-resume", help="Resume from previous checkpoint"
-    ),
-    rate_limit: float = typer.Option(
-        2.0, "--rate-limit", "-r", help="Requests per second"
-    ),
+    year: Optional[int] = typer.Option(None, "--year", "-y", help="Specific year to scrape (2019-2026)"),
+    all_years: bool = typer.Option(False, "--all", help="Scrape all years (2019-2026)"),
+    start: Optional[str] = typer.Option(None, "--start", help="Starting jobPostId (e.g., MCF-2023-0500000)"),
+    end: Optional[str] = typer.Option(None, "--end", help="Ending jobPostId (e.g., MCF-2023-0600000)"),
+    resume: bool = typer.Option(True, "--resume/--no-resume", help="Resume from previous checkpoint"),
+    rate_limit: float = typer.Option(2.0, "--rate-limit", "-r", help="Requests per second"),
     max_rate_limit_retries: int = typer.Option(
         4,
         "--max-rate-limit-retries",
@@ -737,12 +704,8 @@ def scrape_historical(
         "--discover-bounds/--no-discover-bounds",
         help="Discover a tighter end bound before scanning",
     ),
-    not_found_threshold: int = typer.Option(
-        1000, "--not-found-threshold", help="Stop after N consecutive not-found"
-    ),
-    dry_run: bool = typer.Option(
-        False, "--dry-run", help="Preview without fetching"
-    ),
+    not_found_threshold: int = typer.Option(1000, "--not-found-threshold", help="Stop after N consecutive not-found"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without fetching"),
     db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Database path"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Debug logging"),
 ) -> None:
@@ -1013,15 +976,9 @@ def historical_status(
 @app.command(name="daemon")
 def daemon_cmd(
     action: str = typer.Argument(..., help="Action: start, stop, or status"),
-    year: Optional[int] = typer.Option(
-        None, "--year", "-y", help="Year to scrape (for start action)"
-    ),
-    all_years: bool = typer.Option(
-        False, "--all", help="Scrape all years (for start action)"
-    ),
-    rate_limit: float = typer.Option(
-        2.0, "--rate-limit", "-r", help="Initial requests per second"
-    ),
+    year: Optional[int] = typer.Option(None, "--year", "-y", help="Year to scrape (for start action)"),
+    all_years: bool = typer.Option(False, "--all", help="Scrape all years (for start action)"),
+    rate_limit: float = typer.Option(2.0, "--rate-limit", "-r", help="Initial requests per second"),
     max_rate_limit_retries: int = typer.Option(
         4,
         "--max-rate-limit-retries",
@@ -1192,12 +1149,8 @@ def daemon_worker(
 
 @app.command(name="gaps")
 def show_gaps(
-    year: Optional[int] = typer.Option(
-        None, "--year", "-y", help="Specific year to check"
-    ),
-    all_years: bool = typer.Option(
-        False, "--all", help="Check all years"
-    ),
+    year: Optional[int] = typer.Option(None, "--year", "-y", help="Specific year to check"),
+    all_years: bool = typer.Option(False, "--all", help="Check all years"),
     db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Database path"),
 ) -> None:
     """
@@ -1269,20 +1222,14 @@ def show_gaps(
         console.print(f"  Total retryable attempts: {total_retryable:,}")
 
         if total_missing + total_retryable > 0:
-            console.print(f"\nRun [bold]mcf retry-gaps --all[/bold] to retry missing sequences")
+            console.print("\nRun [bold]mcf retry-gaps --all[/bold] to retry missing sequences")
 
 
 @app.command(name="retry-gaps")
 def retry_gaps(
-    year: Optional[int] = typer.Option(
-        None, "--year", "-y", help="Specific year to retry"
-    ),
-    all_years: bool = typer.Option(
-        False, "--all", help="Retry all years"
-    ),
-    rate_limit: float = typer.Option(
-        2.0, "--rate-limit", "-r", help="Requests per second"
-    ),
+    year: Optional[int] = typer.Option(None, "--year", "-y", help="Specific year to retry"),
+    all_years: bool = typer.Option(False, "--all", help="Retry all years"),
+    rate_limit: float = typer.Option(2.0, "--rate-limit", "-r", help="Requests per second"),
     max_rate_limit_retries: int = typer.Option(
         4,
         "--max-rate-limit-retries",
@@ -1390,9 +1337,7 @@ def retry_gaps(
 
 @app.command(name="attempt-stats")
 def attempt_stats(
-    year: Optional[int] = typer.Option(
-        None, "--year", "-y", help="Specific year to show"
-    ),
+    year: Optional[int] = typer.Option(None, "--year", "-y", help="Specific year to show"),
     db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Database path"),
 ) -> None:
     """
@@ -1428,7 +1373,7 @@ def attempt_stats(
             console.print(f"\n  Sequence range: {stats['min_sequence']:,} - {stats['max_sequence']:,}")
             console.print(f"  Range size: {stats['sequence_range']:,}")
 
-            coverage = stats['total'] / stats['sequence_range'] * 100
+            coverage = stats["total"] / stats["sequence_range"] * 100
             console.print(f"  Coverage: {coverage:.1f}%")
 
     else:
@@ -1472,9 +1417,7 @@ def attempt_stats(
 
 @app.command(name="embed-generate")
 def generate_embeddings(
-    batch_size: int = typer.Option(
-        32, "--batch-size", "-b", help="Jobs to process in each batch"
-    ),
+    batch_size: int = typer.Option(32, "--batch-size", "-b", help="Jobs to process in each batch"),
     skip_existing: bool = typer.Option(
         True,
         "--skip-existing/--no-skip-existing",
@@ -1485,9 +1428,7 @@ def generate_embeddings(
         "--build-index/--no-build-index",
         help="Build FAISS indexes after embedding generation",
     ),
-    index_dir: str = typer.Option(
-        "data/embeddings", "--index-dir", help="Directory for FAISS index files"
-    ),
+    index_dir: str = typer.Option("data/embeddings", "--index-dir", help="Directory for FAISS index files"),
     db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Path to SQLite database"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging"),
 ) -> None:
@@ -1603,7 +1544,6 @@ def _build_faiss_indexes(
     console: Console,
 ) -> None:
     """Build FAISS indexes from embeddings in database."""
-    import numpy as np
 
     console.print("\n[bold]Phase 2: Building FAISS Indexes[/bold]\n")
 
@@ -1646,7 +1586,10 @@ def _build_faiss_indexes(
             total_centroids = sum(len(c) for c in company_centroids.values())
             progress.update(
                 task,
-                description=f"Building company index ({len(company_centroids):,} companies, {total_centroids:,} centroids)...",
+                description=(
+                    f"Building company index ({len(company_centroids):,} companies,"
+                    f" {total_centroids:,} centroids)..."
+                ),
             )
             index_manager.build_company_index(company_centroids)
 
@@ -1699,17 +1642,13 @@ def _build_faiss_indexes(
 
 @app.command(name="embed-sync")
 def sync_embeddings(
-    batch_size: int = typer.Option(
-        32, "--batch-size", "-b", help="Jobs to process in each batch"
-    ),
+    batch_size: int = typer.Option(32, "--batch-size", "-b", help="Jobs to process in each batch"),
     update_index: bool = typer.Option(
         True,
         "--update-index/--no-update-index",
         help="Update FAISS indexes with new embeddings",
     ),
-    index_dir: str = typer.Option(
-        "data/embeddings", "--index-dir", help="Directory for FAISS index files"
-    ),
+    index_dir: str = typer.Option("data/embeddings", "--index-dir", help="Directory for FAISS index files"),
     db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Path to SQLite database"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging"),
 ) -> None:
@@ -1829,9 +1768,7 @@ def _update_faiss_index(
 
 @app.command(name="embed-status")
 def embedding_status(
-    index_dir: str = typer.Option(
-        "data/embeddings", "--index-dir", help="Directory for FAISS index files"
-    ),
+    index_dir: str = typer.Option("data/embeddings", "--index-dir", help="Directory for FAISS index files"),
     db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Path to SQLite database"),
 ) -> None:
     """
@@ -1895,7 +1832,11 @@ def embedding_status(
                 mem_str = f"{job_idx['estimated_memory_mb']:.1f} MB"
                 # Check if index is in sync with embeddings
                 in_sync = job_idx["total_vectors"] == stats["job_embeddings"]
-                status = "[green]✓ ready[/green]" if in_sync else f"[yellow]⚠ {stats['job_embeddings'] - job_idx['total_vectors']:+,} out of sync[/yellow]"
+                status = (
+                    "[green]✓ ready[/green]"
+                    if in_sync
+                    else f"[yellow]⚠ {stats['job_embeddings'] - job_idx['total_vectors']:+,} out of sync[/yellow]"
+                )
                 table.add_row("jobs.index", f"{job_idx['total_vectors']:,}", mem_str, status)
 
             # Skill index
@@ -1958,14 +1899,10 @@ def embedding_status(
 @app.command(name="embed-upgrade")
 def upgrade_embeddings(
     model: str = typer.Argument(..., help="New model name (e.g., all-mpnet-base-v2)"),
-    batch_size: int = typer.Option(
-        32, "--batch-size", "-b", help="Jobs to process in each batch"
-    ),
+    batch_size: int = typer.Option(32, "--batch-size", "-b", help="Jobs to process in each batch"),
     db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Path to SQLite database"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging"),
-    confirm: bool = typer.Option(
-        False, "--yes", "-y", help="Skip confirmation prompt"
-    ),
+    confirm: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
 ) -> None:
     """
     Re-generate all embeddings with a new model version.
@@ -2086,13 +2023,9 @@ def semantic_search_cli(
     salary_min: Optional[int] = typer.Option(None, "--salary-min", help="Minimum salary"),
     salary_max: Optional[int] = typer.Option(None, "--salary-max", help="Maximum salary"),
     company: Optional[str] = typer.Option(None, "--company", "-c", help="Filter by company"),
-    employment_type: Optional[str] = typer.Option(
-        None, "--employment-type", "-e", help="Filter by employment type"
-    ),
+    employment_type: Optional[str] = typer.Option(None, "--employment-type", "-e", help="Filter by employment type"),
     region: Optional[str] = typer.Option(None, "--region", "-r", help="Filter by region"),
-    alpha: float = typer.Option(
-        0.7, "--alpha", help="Semantic vs keyword weight (0=keyword, 1=semantic)"
-    ),
+    alpha: float = typer.Option(0.7, "--alpha", help="Semantic vs keyword weight (0=keyword, 1=semantic)"),
     no_expand: bool = typer.Option(False, "--no-expand", help="Disable query expansion"),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Database path"),
@@ -2166,7 +2099,7 @@ def _print_search_json(response: SearchResponse, query: str) -> None:
 
 def _display_search_results(response: SearchResponse, query: str) -> None:
     """Display search results as a Rich table."""
-    console.print(f"\n[bold blue]Semantic Search Results[/bold blue]")
+    console.print("\n[bold blue]Semantic Search Results[/bold blue]")
     console.print("━" * 70)
 
     # Query info
@@ -2209,7 +2142,7 @@ def _display_search_results(response: SearchResponse, query: str) -> None:
 
     console.print()
     console.print(table)
-    console.print(f"\n[dim]Tip: Use --json for programmatic access[/dim]")
+    console.print("\n[dim]Tip: Use --json for programmatic access[/dim]")
 
 
 # API server command
@@ -2219,18 +2152,10 @@ def _display_search_results(response: SearchResponse, query: str) -> None:
 def serve_api(
     host: str = typer.Option("127.0.0.1", "--host", "-H", help="Host to bind to"),
     port: int = typer.Option(8000, "--port", "-p", help="Port to bind to"),
-    db_path: str = typer.Option(
-        "data/mcf_jobs.db", "--db", help="Path to SQLite database"
-    ),
-    index_dir: str = typer.Option(
-        "data/embeddings", "--index-dir", help="Path to FAISS indexes"
-    ),
-    reload: bool = typer.Option(
-        False, "--reload", help="Enable auto-reload for development"
-    ),
-    workers: int = typer.Option(
-        1, "--workers", "-w", help="Number of worker processes (production)"
-    ),
+    db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Path to SQLite database"),
+    index_dir: str = typer.Option("data/embeddings", "--index-dir", help="Path to FAISS indexes"),
+    reload: bool = typer.Option(False, "--reload", help="Enable auto-reload for development"),
+    workers: int = typer.Option(1, "--workers", "-w", help="Number of worker processes (production)"),
     cors_origins: str = typer.Option(
         "http://localhost:3000,http://localhost:5173",
         "--cors",
@@ -2252,6 +2177,7 @@ def serve_api(
         mcf api-serve --workers 4         # Production mode
     """
     import os
+
     import uvicorn
 
     origins = [o.strip() for o in cors_origins.split(",") if o.strip()]
@@ -2264,9 +2190,7 @@ def serve_api(
 
     index_path = Path(index_dir)
     if not (index_path / "jobs.index").exists():
-        console.print(
-            f"[yellow]Warning:[/yellow] FAISS index not found in {index_dir}"
-        )
+        console.print(f"[yellow]Warning:[/yellow] FAISS index not found in {index_dir}")
         console.print("API will run in degraded mode (keyword search only).")
         console.print("Run 'mcf embed-generate' to enable semantic search.")
 
@@ -2307,9 +2231,7 @@ def serve_api(
 def run_benchmark(
     queries: int = typer.Option(100, "--queries", "-n", help="Number of benchmark queries"),
     warmup: int = typer.Option(10, "--warmup", help="Number of warmup queries"),
-    embed_texts: int = typer.Option(
-        100, "--embed-texts", help="Number of texts for embedding benchmark"
-    ),
+    embed_texts: int = typer.Option(100, "--embed-texts", help="Number of texts for embedding benchmark"),
     db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Database path"),
     index_dir: str = typer.Option("data/embeddings", "--index-dir", help="FAISS index directory"),
 ) -> None:
@@ -2333,11 +2255,16 @@ def run_benchmark(
         [
             sys.executable,
             "scripts/benchmark.py",
-            "--queries", str(queries),
-            "--warmup", str(warmup),
-            "--embed-texts", str(embed_texts),
-            "--db", db_path,
-            "--index-dir", index_dir,
+            "--queries",
+            str(queries),
+            "--warmup",
+            str(warmup),
+            "--embed-texts",
+            str(embed_texts),
+            "--db",
+            db_path,
+            "--index-dir",
+            index_dir,
         ],
     )
     raise typer.Exit(result.returncode)

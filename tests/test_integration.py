@@ -13,7 +13,7 @@ import pytest
 
 from src.mcf.database import MCFDatabase
 
-from .factories import generate_test_job, generate_similar_jobs
+from .factories import generate_test_job
 
 
 class TestDatabaseEmbeddingIntegration:

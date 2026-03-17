@@ -5,23 +5,22 @@ These tests ensure our factories generate valid data that can be
 used reliably in other tests.
 """
 
-import pytest
 from datetime import date
 
 from src.mcf.models import Job
 
 from .factories import (
+    generate_address,
+    generate_categories,
+    generate_company,
+    generate_company_job_set,
+    generate_metadata,
+    generate_salary,
+    generate_salary_range_jobs,
+    generate_similar_jobs,
+    generate_skills,
     generate_test_job,
     generate_test_jobs,
-    generate_similar_jobs,
-    generate_company_job_set,
-    generate_salary_range_jobs,
-    generate_salary,
-    generate_company,
-    generate_skills,
-    generate_categories,
-    generate_address,
-    generate_metadata,
 )
 
 

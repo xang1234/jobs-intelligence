@@ -5,20 +5,21 @@ These tests verify that models correctly parse API responses,
 compute derived fields, and handle edge cases.
 """
 
-import pytest
 from datetime import date
 
+import pytest
+
 from src.mcf.models import (
+    Address,
+    Category,
+    Company,
+    EmploymentType,
     Job,
+    JobMetadata,
+    PositionLevel,
     Salary,
     SalaryType,
-    Company,
     Skill,
-    Category,
-    Address,
-    EmploymentType,
-    PositionLevel,
-    JobMetadata,
 )
 
 

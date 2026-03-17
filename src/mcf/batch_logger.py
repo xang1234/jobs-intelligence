@@ -76,12 +76,14 @@ class BatchLogger:
                 or 'rate_limited'
             error_message: Optional error message for retryable results
         """
-        self._buffer.append({
-            "year": year,
-            "sequence": sequence,
-            "result": result,
-            "error_message": error_message,
-        })
+        self._buffer.append(
+            {
+                "year": year,
+                "sequence": sequence,
+                "result": result,
+                "error_message": error_message,
+            }
+        )
 
         if len(self._buffer) >= self.batch_size:
             self.flush()

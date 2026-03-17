@@ -33,23 +33,23 @@ Example:
         print(f"{job.title} at {job.company_name}: {job.similarity_score:.3f}")
 """
 
-from .models import (
-    EmbeddingStats,
-    SkillClusterResult,
-    SearchRequest,
-    SearchResponse,
-    JobResult,
-    SearchExplanation,
-    SimilarJobsRequest,
-    SkillSearchRequest,
-    CompanySimilarityRequest,
-    CompanySimilarity,
-)
 from .generator import EmbeddingGenerator
 from .index_manager import (
     FAISSIndexManager,
-    IndexNotBuiltError,
     IndexCompatibilityError,
+    IndexNotBuiltError,
+)
+from .models import (
+    CompanySimilarity,
+    CompanySimilarityRequest,
+    EmbeddingStats,
+    JobResult,
+    SearchExplanation,
+    SearchRequest,
+    SearchResponse,
+    SimilarJobsRequest,
+    SkillClusterResult,
+    SkillSearchRequest,
 )
 from .query_expander import QueryExpander
 from .search_engine import SemanticSearchEngine

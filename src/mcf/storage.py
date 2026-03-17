@@ -16,8 +16,8 @@ from typing import Optional
 
 import pandas as pd
 
-from .models import Job, Checkpoint
 from .database import MCFDatabase
+from .models import Checkpoint, Job
 
 logger = logging.getLogger(__name__)
 
@@ -260,8 +260,7 @@ class JobStorage:
                 data = json.load(f)
             checkpoint = Checkpoint.model_validate(data)
             logger.info(
-                f"Resumed from checkpoint: {checkpoint.fetched_count} jobs, "
-                f"offset {checkpoint.current_offset}"
+                f"Resumed from checkpoint: {checkpoint.fetched_count} jobs, " f"offset {checkpoint.current_offset}"
             )
             return checkpoint
         except Exception as e:

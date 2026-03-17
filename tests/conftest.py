@@ -21,12 +21,11 @@ from src.mcf.database import MCFDatabase
 from src.mcf.models import Job
 
 from .factories import (
-    generate_test_jobs,
-    generate_similar_jobs,
     generate_company_job_set,
     generate_salary_range_jobs,
+    generate_similar_jobs,
+    generate_test_jobs,
 )
-
 
 # =============================================================================
 # Basic Fixtures

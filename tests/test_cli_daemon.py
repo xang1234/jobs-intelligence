@@ -7,7 +7,6 @@ from typer.testing import CliRunner
 
 import src.cli as cli
 
-
 runner = CliRunner()
 
 
@@ -53,9 +52,7 @@ def test_daemon_start_uses_read_only_database(monkeypatch, temp_dir: Path):
     }
 
 
-def test_daemon_worker_skips_schema_on_locked_existing_database(
-    monkeypatch, temp_dir: Path
-):
+def test_daemon_worker_skips_schema_on_locked_existing_database(monkeypatch, temp_dir: Path):
     """Worker should fall back when schema init hits a lock on an existing DB."""
     db_path = temp_dir / "test.db"
     db_path.touch()

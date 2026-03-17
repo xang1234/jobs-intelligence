@@ -10,15 +10,14 @@ Provides robust access to the MCF public API with:
 import asyncio
 import logging
 from typing import Optional
-from urllib.parse import urlencode
 
 import httpx
 from tenacity import (
+    before_sleep_log,
     retry,
+    retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
-    retry_if_exception_type,
-    before_sleep_log,
 )
 
 from .models import Job, JobSearchResponse
@@ -28,16 +27,19 @@ logger = logging.getLogger(__name__)
 
 class MCFAPIError(Exception):
     """Base exception for MCF API errors."""
+
     pass
 
 
 class MCFRateLimitError(MCFAPIError):
     """Raised when rate limited by the API."""
+
     pass
 
 
 class MCFNotFoundError(MCFAPIError):
     """Raised when a resource is not found."""
+
     pass
 
 
@@ -135,9 +137,7 @@ class MCFClient:
             raise MCFNotFoundError(f"Resource not found: {response.url}")
 
         if response.status_code >= 400:
-            raise MCFAPIError(
-                f"API error {response.status_code}: {response.text[:200]}"
-            )
+            raise MCFAPIError(f"API error {response.status_code}: {response.text[:200]}")
 
         return response.json()
 

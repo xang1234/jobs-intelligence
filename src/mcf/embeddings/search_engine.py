@@ -23,7 +23,6 @@ Example:
         print(f"{job.title} at {job.company_name}: {job.similarity_score:.3f}")
 """
 
-import hashlib
 import logging
 import re
 import time
@@ -38,8 +37,8 @@ from ..database import MCFDatabase
 from .generator import EmbeddingGenerator
 from .index_manager import (
     FAISSIndexManager,
-    IndexNotBuiltError,
     IndexCompatibilityError,
+    IndexNotBuiltError,
 )
 from .models import (
     CompanySimilarity,
@@ -154,8 +153,7 @@ class SemanticSearchEngine:
                 logger.info("FAISS indexes loaded successfully")
             else:
                 logger.warning(
-                    f"FAISS indexes not found at {self.index_dir}. "
-                    "Run 'mcf embed-generate' to build indexes."
+                    f"FAISS indexes not found at {self.index_dir}. " "Run 'mcf embed-generate' to build indexes."
                 )
                 self._degraded = True
         except IndexCompatibilityError as e:
@@ -172,8 +170,7 @@ class SemanticSearchEngine:
             logger.info(f"Query expander loaded: {self.query_expander.get_stats()}")
         except FileNotFoundError:
             logger.warning(
-                "Skill clusters not found. Query expansion disabled. "
-                "Run 'mcf embed-generate' to create clusters."
+                "Skill clusters not found. Query expansion disabled. " "Run 'mcf embed-generate' to create clusters."
             )
         except Exception as e:
             logger.warning(f"Failed to load query expander: {e}")
@@ -230,7 +227,8 @@ class SemanticSearchEngine:
                 vector_k = max(1000, request.limit * 50)
                 query_embedding = self._get_query_embedding(request.query)
                 semantic_results = self.index_manager.search_jobs(
-                    query_embedding, k=vector_k,
+                    query_embedding,
+                    k=vector_k,
                 )
                 candidate_uuids = [uuid for uuid, _ in semantic_results]
                 total_candidates = self.index_manager.indexes["jobs"].ntotal
@@ -281,11 +279,9 @@ class SemanticSearchEngine:
                 )
 
             # Step 4: Filter by minimum similarity and limit
-            filtered_results = [
-                (uuid, score)
-                for uuid, score in scored_results
-                if score >= request.min_similarity
-            ][: request.limit]
+            filtered_results = [(uuid, score) for uuid, score in scored_results if score >= request.min_similarity][
+                : request.limit
+            ]
 
             # Step 5: Enrich with full job data
             results = self._enrich_results(
@@ -402,10 +398,7 @@ class SemanticSearchEngine:
         # Apply freshness boost
         if request.freshness_weight > 0 and filtered:
             freshness = self._compute_freshness_scores([uuid for uuid, _ in filtered])
-            filtered = [
-                (uuid, score + request.freshness_weight * freshness.get(uuid, 0.5))
-                for uuid, score in filtered
-            ]
+            filtered = [(uuid, score + request.freshness_weight * freshness.get(uuid, 0.5)) for uuid, score in filtered]
             filtered.sort(key=lambda x: x[1], reverse=True)
             for uuid, total_score in filtered:
                 detail = score_details.setdefault(uuid, {})
@@ -461,24 +454,23 @@ class SemanticSearchEngine:
             )
 
         try:
-            has_sql_filters = any([
-                request.salary_min is not None,
-                request.salary_max is not None,
-                request.employment_type is not None,
-            ])
+            has_sql_filters = any(
+                [
+                    request.salary_min is not None,
+                    request.salary_max is not None,
+                    request.employment_type is not None,
+                ]
+            )
 
             # Fetch more candidates when SQL filters will reduce the set
             k_multiplier = 4 if has_sql_filters else 2
             results = self.index_manager.search_jobs(
-                skill_embedding, k=request.limit * k_multiplier,
+                skill_embedding,
+                k=request.limit * k_multiplier,
             )
 
             # Filter by minimum similarity
-            filtered = [
-                (uuid, score)
-                for uuid, score in results
-                if score >= request.min_similarity
-            ]
+            filtered = [(uuid, score) for uuid, score in results if score >= request.min_similarity]
 
             # Apply SQL filters by intersecting with DB results
             if has_sql_filters and filtered:
@@ -490,11 +482,7 @@ class SemanticSearchEngine:
                 )
                 sql_matches = self._apply_sql_filters(sql_filter_request)
                 allowed_uuids = {job["uuid"] for job in sql_matches}
-                filtered = [
-                    (uuid, score)
-                    for uuid, score in filtered
-                    if uuid in allowed_uuids
-                ]
+                filtered = [(uuid, score) for uuid, score in filtered if uuid in allowed_uuids]
 
             filtered = filtered[: request.limit]
             score_details = {
@@ -581,19 +569,13 @@ class SemanticSearchEngine:
                 continue
             if region and job.get("region") != region:
                 continue
-            if normalized_titles and not any(
-                title in (job.get("title", "").lower()) for title in normalized_titles
-            ):
+            if normalized_titles and not any(title in (job.get("title", "").lower()) for title in normalized_titles):
                 continue
 
             job_skills = self._parse_skills(job.get("skills"))
             matched_skills = sorted(set(extracted_skills).intersection(job_skills))
             missing_skills = sorted(set(extracted_skills) - set(job_skills))
-            skill_overlap = (
-                len(matched_skills) / len(extracted_skills)
-                if extracted_skills
-                else 0.0
-            )
+            skill_overlap = len(matched_skills) / len(extracted_skills) if extracted_skills else 0.0
 
             retrieval_score = float(raw_semantic)
             semantic_score = retrieval_score if self._has_vector_index and not self._degraded else 0.0
@@ -648,9 +630,7 @@ class SemanticSearchEngine:
             "degraded": self._degraded,
         }
 
-    def find_similar_companies(
-        self, request: CompanySimilarityRequest
-    ) -> list[CompanySimilarity]:
+    def find_similar_companies(self, request: CompanySimilarityRequest) -> list[CompanySimilarity]:
         """
         Find companies with similar job profiles.
 
@@ -681,13 +661,9 @@ class SemanticSearchEngine:
 
         # Primary path: use pre-computed company multi-centroid index
         if self.index_manager.has_company_index():
-            source_centroids = self.index_manager.get_company_centroids(
-                request.company_name
-            )
+            source_centroids = self.index_manager.get_company_centroids(request.company_name)
             if source_centroids is not None:
-                return self._find_similar_companies_multi_centroid(
-                    request, source_centroids
-                )
+                return self._find_similar_companies_multi_centroid(request, source_centroids)
 
         # Fallback: on-the-fly single centroid via jobs index
         return self._find_similar_companies_fallback(request)
@@ -715,9 +691,7 @@ class SemanticSearchEngine:
         # For each source centroid, search company index
         for centroid in source_centroids:
             try:
-                results = self.index_manager.search_companies(
-                    centroid, k=request.limit + 10
-                )
+                results = self.index_manager.search_companies(centroid, k=request.limit + 10)
             except IndexNotBuiltError:
                 continue
 
@@ -729,9 +703,7 @@ class SemanticSearchEngine:
                     company_scores[company_name] = score
 
         # Sort by score descending
-        sorted_companies = sorted(
-            company_scores.items(), key=lambda x: x[1], reverse=True
-        )[: request.limit]
+        sorted_companies = sorted(company_scores.items(), key=lambda x: x[1], reverse=True)[: request.limit]
 
         # Enrich with company stats
         results_list: list[CompanySimilarity] = []
@@ -749,9 +721,7 @@ class SemanticSearchEngine:
 
         return results_list
 
-    def _find_similar_companies_fallback(
-        self, request: CompanySimilarityRequest
-    ) -> list[CompanySimilarity]:
+    def _find_similar_companies_fallback(self, request: CompanySimilarityRequest) -> list[CompanySimilarity]:
         """
         Fallback: compute single centroid on-the-fly and search jobs index.
 
@@ -804,8 +774,7 @@ class SemanticSearchEngine:
 
         # Take average score per company
         company_avg: list[tuple[str, float]] = [
-            (company, sum(scores) / len(scores))
-            for company, scores in company_scores.items()
+            (company, sum(scores) / len(scores)) for company, scores in company_scores.items()
         ]
         company_avg.sort(key=lambda x: x[1], reverse=True)
 
@@ -871,13 +840,15 @@ class SemanticSearchEngine:
 
     def _has_sql_filters(self, request: SearchRequest) -> bool:
         """Check whether a request has any active SQL filter parameters."""
-        return any([
-            request.salary_min is not None,
-            request.salary_max is not None,
-            request.employment_type is not None,
-            request.company is not None,
-            request.region is not None,
-        ])
+        return any(
+            [
+                request.salary_min is not None,
+                request.salary_max is not None,
+                request.employment_type is not None,
+                request.company is not None,
+                request.region is not None,
+            ]
+        )
 
     def _apply_sql_filters(self, request: SearchRequest) -> list[dict]:
         """
@@ -976,11 +947,7 @@ class SemanticSearchEngine:
         bm25_scores = self._get_bm25_scores(search_query, candidate_uuids)
 
         # Get freshness scores
-        freshness_scores = (
-            self._compute_freshness_scores(candidate_uuids)
-            if freshness_weight > 0
-            else {}
-        )
+        freshness_scores = self._compute_freshness_scores(candidate_uuids) if freshness_weight > 0 else {}
 
         # Normalize scores to [0, 1] range for fair combination
         semantic_scores = self._normalize_scores(semantic_scores)
@@ -994,11 +961,7 @@ class SemanticSearchEngine:
             bm25_score = bm25_scores.get(uuid, 0.0)
             fresh_score = freshness_scores.get(uuid, 0.5)
 
-            combined[uuid] = (
-                alpha * sem_score
-                + (1 - alpha) * bm25_score
-                + freshness_weight * fresh_score
-            )
+            combined[uuid] = alpha * sem_score + (1 - alpha) * bm25_score + freshness_weight * fresh_score
             details[uuid] = {
                 "semantic_score": round(float(sem_score), 4),
                 "bm25_score": round(float(bm25_score), 4),
@@ -1011,9 +974,7 @@ class SemanticSearchEngine:
 
         return sorted_results, details
 
-    def _get_bm25_scores(
-        self, query: str, candidate_uuids: list[str]
-    ) -> dict[str, float]:
+    def _get_bm25_scores(self, query: str, candidate_uuids: list[str]) -> dict[str, float]:
         """
         Get BM25 scores for candidates.
 
@@ -1064,11 +1025,7 @@ class SemanticSearchEngine:
         bm25_scores = self._get_bm25_scores(search_query, candidate_uuids)
         bm25_scores = self._normalize_scores(bm25_scores)
 
-        freshness_scores = (
-            self._compute_freshness_scores(candidate_uuids)
-            if freshness_weight > 0
-            else {}
-        )
+        freshness_scores = self._compute_freshness_scores(candidate_uuids) if freshness_weight > 0 else {}
 
         combined: dict[str, float] = {}
         details: dict[str, dict[str, float | list[str]]] = {}
@@ -1085,9 +1042,7 @@ class SemanticSearchEngine:
         sorted_results = sorted(combined.items(), key=lambda x: x[1], reverse=True)
         return sorted_results, details
 
-    def _keyword_fallback_search(
-        self, request: SearchRequest, start_time: float
-    ) -> SearchResponse:
+    def _keyword_fallback_search(self, request: SearchRequest, start_time: float) -> SearchResponse:
         """
         Fallback search using only keywords when vectors fail.
 
@@ -1185,19 +1140,14 @@ class SemanticSearchEngine:
             # All scores are the same
             return {uuid: 0.5 for uuid in scores}
 
-        return {
-            uuid: (score - min_val) / (max_val - min_val)
-            for uuid, score in scores.items()
-        }
+        return {uuid: (score - min_val) / (max_val - min_val) for uuid, score in scores.items()}
 
     def _load_skill_vocabulary(self) -> list[tuple[str, str]]:
         """Load and cache the canonical skill vocabulary for extraction."""
         if self._skill_vocabulary is None:
             skills = self.db.get_all_unique_skills()
             self._skill_vocabulary = [
-                (skill, skill.lower())
-                for skill in sorted(skills, key=len, reverse=True)
-                if len(skill.strip()) >= 2
+                (skill, skill.lower()) for skill in sorted(skills, key=len, reverse=True) if len(skill.strip()) >= 2
             ]
         return self._skill_vocabulary
 
@@ -1244,9 +1194,7 @@ class SemanticSearchEngine:
                 return level
         return None
 
-    def _infer_profile_seniority(
-        self, profile_text: str, target_titles: Optional[list[str]] = None
-    ) -> Optional[str]:
+    def _infer_profile_seniority(self, profile_text: str, target_titles: Optional[list[str]] = None) -> Optional[str]:
         """Infer approximate seniority from the pasted profile text."""
         combined = " ".join((target_titles or []) + [profile_text])
         return self._normalize_seniority(combined)
@@ -1433,11 +1381,13 @@ class SemanticSearchEngine:
             cluster_id = None
             if self.query_expander:
                 cluster_id = self.query_expander.skill_to_cluster.get(skill)
-            items.append({
-                "skill": skill,
-                "job_count": count,
-                "cluster_id": cluster_id,
-            })
+            items.append(
+                {
+                    "skill": skill,
+                    "job_count": count,
+                    "cluster_id": cluster_id,
+                }
+            )
 
         return {
             "items": items,
@@ -1475,9 +1425,7 @@ class SemanticSearchEngine:
             skill_idx = self.index_manager.skill_to_idx.get(skill)
             if skill_idx is not None:
                 # Reconstruct the skill's own embedding from the Flat index
-                skill_embedding = self.index_manager.indexes["skills"].reconstruct(
-                    skill_idx
-                )
+                skill_embedding = self.index_manager.indexes["skills"].reconstruct(skill_idx)
                 similar = self.index_manager.search_skills(skill_embedding, k=k + 1)
 
                 related = []
@@ -1487,14 +1435,14 @@ class SemanticSearchEngine:
                     same_cluster = False
                     if self.query_expander:
                         s_cluster = self.query_expander.skill_to_cluster.get(s)
-                        same_cluster = (
-                            s_cluster is not None and s_cluster == source_cluster
-                        )
-                    related.append({
-                        "skill": s,
-                        "similarity": round(float(score), 4),
-                        "same_cluster": same_cluster,
-                    })
+                        same_cluster = s_cluster is not None and s_cluster == source_cluster
+                    related.append(
+                        {
+                            "skill": s,
+                            "similarity": round(float(score), 4),
+                            "same_cluster": same_cluster,
+                        }
+                    )
 
                 return {
                     "skill": skill,
@@ -1507,10 +1455,7 @@ class SemanticSearchEngine:
             if cluster_skills:
                 return {
                     "skill": skill,
-                    "related": [
-                        {"skill": s, "similarity": 1.0, "same_cluster": True}
-                        for s in cluster_skills
-                    ],
+                    "related": [{"skill": s, "similarity": 1.0, "same_cluster": True} for s in cluster_skills],
                 }
 
         return None  # Skill not found

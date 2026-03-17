@@ -19,11 +19,16 @@ from pydantic import BaseModel, Field, field_validator
 
 from ..mcf.embeddings.models import (
     CompanySimilarityRequest as InternalCompanySimilarityRequest,
+)
+from ..mcf.embeddings.models import (
     SearchRequest as InternalSearchRequest,
+)
+from ..mcf.embeddings.models import (
     SimilarJobsRequest as InternalSimilarJobsRequest,
+)
+from ..mcf.embeddings.models import (
     SkillSearchRequest as InternalSkillSearchRequest,
 )
-
 
 # =============================================================================
 # Request Models
@@ -33,33 +38,21 @@ from ..mcf.embeddings.models import (
 class SearchRequest(BaseModel):
     """Request for semantic job search."""
 
-    query: str = Field(
-        ..., min_length=1, max_length=500, description="Search query text"
-    )
+    query: str = Field(..., min_length=1, max_length=500, description="Search query text")
     limit: int = Field(10, ge=1, le=100, description="Maximum results to return")
 
     # SQL Filters
     salary_min: Optional[int] = Field(None, ge=0, description="Minimum salary filter")
     salary_max: Optional[int] = Field(None, ge=0, description="Maximum salary filter")
-    employment_type: Optional[str] = Field(
-        None, description="Employment type: 'Full Time', 'Part Time', 'Contract'"
-    )
+    employment_type: Optional[str] = Field(None, description="Employment type: 'Full Time', 'Part Time', 'Contract'")
     region: Optional[str] = Field(None, description="Region filter")
-    company: Optional[str] = Field(
-        None, description="Company name filter (partial match)"
-    )
+    company: Optional[str] = Field(None, description="Company name filter (partial match)")
 
     # Hybrid Search Tuning
-    alpha: float = Field(
-        0.7, ge=0.0, le=1.0, description="Weight for semantic vs BM25 (0.7 = 70% semantic)"
-    )
-    freshness_weight: float = Field(
-        0.1, ge=0.0, le=1.0, description="Weight for recency boost"
-    )
+    alpha: float = Field(0.7, ge=0.0, le=1.0, description="Weight for semantic vs BM25 (0.7 = 70% semantic)")
+    freshness_weight: float = Field(0.1, ge=0.0, le=1.0, description="Weight for recency boost")
     expand_query: bool = Field(True, description="Enable query expansion with synonyms")
-    min_similarity: float = Field(
-        0.3, ge=0.0, le=1.0, description="Minimum similarity score threshold"
-    )
+    min_similarity: float = Field(0.3, ge=0.0, le=1.0, description="Minimum similarity score threshold")
 
     @field_validator("salary_max")
     @classmethod
@@ -104,12 +97,8 @@ class SimilarJobsRequest(BaseModel):
 
     job_uuid: str = Field(..., description="Source job UUID")
     limit: int = Field(10, ge=1, le=100, description="Maximum results to return")
-    exclude_same_company: bool = Field(
-        False, description="Exclude jobs from the same company"
-    )
-    freshness_weight: float = Field(
-        0.1, ge=0.0, le=1.0, description="Weight for recency boost"
-    )
+    exclude_same_company: bool = Field(False, description="Exclude jobs from the same company")
+    freshness_weight: float = Field(0.1, ge=0.0, le=1.0, description="Weight for recency boost")
 
     def to_internal(self) -> InternalSimilarJobsRequest:
         """Convert to the internal search engine dataclass."""
@@ -124,23 +113,15 @@ class SimilarJobsRequest(BaseModel):
 class SimilarBatchRequest(BaseModel):
     """Request for batch similar jobs lookup."""
 
-    job_uuids: list[str] = Field(
-        ..., min_length=1, max_length=50, description="List of job UUIDs (max 50)"
-    )
-    limit_per_job: int = Field(
-        5, ge=1, le=20, description="Results per job"
-    )
-    exclude_same_company: bool = Field(
-        False, description="Exclude jobs from the same company"
-    )
+    job_uuids: list[str] = Field(..., min_length=1, max_length=50, description="List of job UUIDs (max 50)")
+    limit_per_job: int = Field(5, ge=1, le=20, description="Results per job")
+    exclude_same_company: bool = Field(False, description="Exclude jobs from the same company")
 
 
 class SkillSearchRequest(BaseModel):
     """Request for skill-based job search."""
 
-    skill: str = Field(
-        ..., min_length=1, max_length=100, description="Skill to search for"
-    )
+    skill: str = Field(..., min_length=1, max_length=100, description="Skill to search for")
     limit: int = Field(20, ge=1, le=100, description="Maximum results to return")
 
     # Optional SQL filters
@@ -170,9 +151,7 @@ class SkillSearchRequest(BaseModel):
 class CompanySimilarityRequest(BaseModel):
     """Request for finding similar companies."""
 
-    company_name: str = Field(
-        ..., min_length=1, max_length=200, description="Source company name"
-    )
+    company_name: str = Field(..., min_length=1, max_length=200, description="Source company name")
     limit: int = Field(10, ge=1, le=50, description="Maximum results to return")
 
     def to_internal(self) -> InternalCompanySimilarityRequest:
@@ -307,16 +286,10 @@ class SearchResponse(BaseModel):
     """Response from search endpoints."""
 
     results: list[JobResult]
-    total_candidates: int = Field(
-        description="Jobs matching filters before semantic ranking"
-    )
+    total_candidates: int = Field(description="Jobs matching filters before semantic ranking")
     search_time_ms: float
-    query_expansion: Optional[list[str]] = Field(
-        None, description="Expanded query terms if expansion was enabled"
-    )
-    degraded: bool = Field(
-        False, description="True if fell back to keyword-only search"
-    )
+    query_expansion: Optional[list[str]] = Field(None, description="Expanded query terms if expansion was enabled")
+    degraded: bool = Field(False, description="True if fell back to keyword-only search")
     cache_hit: bool = Field(False, description="True if result was served from cache")
 
     @classmethod
@@ -364,9 +337,7 @@ class SearchResponse(BaseModel):
 class SimilarBatchResponse(BaseModel):
     """Response from batch similar jobs endpoint."""
 
-    results: dict[str, list[JobResult]] = Field(
-        description="Mapping of UUID -> similar jobs"
-    )
+    results: dict[str, list[JobResult]] = Field(description="Mapping of UUID -> similar jobs")
     search_time_ms: float
 
 
@@ -377,9 +348,7 @@ class CompanySimilarity(BaseModel):
     similarity_score: float
     job_count: int = Field(description="Total jobs from this company")
     avg_salary: Optional[int] = Field(None, description="Average salary offered")
-    top_skills: list[str] = Field(
-        default_factory=list, description="Most common skills in job postings"
-    )
+    top_skills: list[str] = Field(default_factory=list, description="Most common skills in job postings")
 
     @classmethod
     def from_internal(cls, internal) -> "CompanySimilarity":
@@ -423,18 +392,14 @@ class SkillCloudItem(BaseModel):
 
     skill: str
     job_count: int
-    cluster_id: Optional[int] = Field(
-        None, description="Cluster ID for color coding in visualizations"
-    )
+    cluster_id: Optional[int] = Field(None, description="Cluster ID for color coding in visualizations")
 
 
 class SkillCloudResponse(BaseModel):
     """Response for skill cloud endpoint."""
 
     items: list[SkillCloudItem]
-    total_unique_skills: int = Field(
-        description="Total unique skills across all jobs (before filtering)"
-    )
+    total_unique_skills: int = Field(description="Total unique skills across all jobs (before filtering)")
 
 
 class RelatedSkill(BaseModel):
@@ -442,9 +407,7 @@ class RelatedSkill(BaseModel):
 
     skill: str
     similarity: float = Field(description="Cosine similarity [0, 1]")
-    same_cluster: bool = Field(
-        description="True if in same skill cluster (strong synonym)"
-    )
+    same_cluster: bool = Field(description="True if in same skill cluster (strong synonym)")
 
 
 class RelatedSkillsResponse(BaseModel):

@@ -92,7 +92,7 @@ class FAISSIndexManager:
         self.model_version = model_version
 
         # Index storage
-        self.indexes: dict[str, "faiss.Index"] = {}
+        self.indexes: dict = {}
 
         # Mapping storage (index position -> entity ID)
         self.uuid_to_idx: dict[str, int] = {}
@@ -138,9 +138,7 @@ class FAISSIndexManager:
         import faiss
 
         if len(embeddings) != len(uuids):
-            raise ValueError(
-                f"embeddings ({len(embeddings)}) and uuids ({len(uuids)}) must have same length"
-            )
+            raise ValueError(f"embeddings ({len(embeddings)}) and uuids ({len(uuids)}) must have same length")
 
         n_vectors = len(embeddings)
         dimension = embeddings.shape[1]
@@ -171,9 +169,7 @@ class FAISSIndexManager:
 
             # IVFFlat: Inverted file with flat storage
             # METRIC_INNER_PRODUCT for normalized vectors = cosine similarity
-            index = faiss.IndexIVFFlat(
-                quantizer, dimension, nlist, faiss.METRIC_INNER_PRODUCT
-            )
+            index = faiss.IndexIVFFlat(quantizer, dimension, nlist, faiss.METRIC_INNER_PRODUCT)
 
             # Train the index (learn cluster centroids)
             logger.info("Training IVFFlat index...")
@@ -218,8 +214,7 @@ class FAISSIndexManager:
 
         if len(embeddings) != len(skill_names):
             raise ValueError(
-                f"embeddings ({len(embeddings)}) and skill_names ({len(skill_names)}) "
-                "must have same length"
+                f"embeddings ({len(embeddings)}) and skill_names ({len(skill_names)}) " "must have same length"
             )
 
         n_skills = len(embeddings)
@@ -325,11 +320,7 @@ class FAISSIndexManager:
             IndexNotBuiltError: If job index hasn't been built
         """
         if "jobs" not in self.indexes or self.indexes["jobs"] is None:
-            raise IndexNotBuiltError(
-                "Job index not built. Run embed-generate and build-index first."
-            )
-
-        import faiss
+            raise IndexNotBuiltError("Job index not built. Run embed-generate and build-index first.")
 
         index = self.indexes["jobs"]
 
@@ -338,9 +329,7 @@ class FAISSIndexManager:
             index.nprobe = nprobe or self._default_nprobe
 
         # Prepare query vector
-        query = np.ascontiguousarray(
-            query_vector.reshape(1, -1).astype(np.float32)
-        )
+        query = np.ascontiguousarray(query_vector.reshape(1, -1).astype(np.float32))
 
         # Search
         similarities, indices = index.search(query, k)
@@ -379,9 +368,7 @@ class FAISSIndexManager:
             IndexNotBuiltError: If job index hasn't been built
         """
         if "jobs" not in self.indexes or self.indexes["jobs"] is None:
-            raise IndexNotBuiltError(
-                "Job index not built. Run embed-generate and build-index first."
-            )
+            raise IndexNotBuiltError("Job index not built. Run embed-generate and build-index first.")
 
         if not allowed_uuids:
             return []
@@ -431,9 +418,7 @@ class FAISSIndexManager:
         temp_index.add(embeddings_matrix)
 
         # Search
-        query = np.ascontiguousarray(
-            query_vector.reshape(1, -1).astype(np.float32)
-        )
+        query = np.ascontiguousarray(query_vector.reshape(1, -1).astype(np.float32))
         similarities, indices = temp_index.search(query, min(k, len(uuids)))
 
         # Build results
@@ -472,10 +457,7 @@ class FAISSIndexManager:
         all_results = self.search_jobs(query_vector, k=search_k)
 
         # Filter to allowed UUIDs
-        filtered = [
-            (uuid, score) for uuid, score in all_results
-            if uuid in allowed_uuids
-        ]
+        filtered = [(uuid, score) for uuid, score in all_results if uuid in allowed_uuids]
 
         return filtered[:k]
 
@@ -500,16 +482,12 @@ class FAISSIndexManager:
             IndexNotBuiltError: If skill index hasn't been built
         """
         if "skills" not in self.indexes or self.indexes["skills"] is None:
-            raise IndexNotBuiltError(
-                "Skill index not built. Run embed-generate first."
-            )
+            raise IndexNotBuiltError("Skill index not built. Run embed-generate first.")
 
         index = self.indexes["skills"]
 
         # Prepare query
-        query = np.ascontiguousarray(
-            query_vector.reshape(1, -1).astype(np.float32)
-        )
+        query = np.ascontiguousarray(query_vector.reshape(1, -1).astype(np.float32))
 
         # Search
         similarities, indices = index.search(query, k)
@@ -548,9 +526,7 @@ class FAISSIndexManager:
             IndexNotBuiltError: If company index hasn't been built
         """
         if "companies" not in self.indexes or self.indexes["companies"] is None:
-            raise IndexNotBuiltError(
-                "Company index not built. Run embed-generate first."
-            )
+            raise IndexNotBuiltError("Company index not built. Run embed-generate first.")
 
         if self._all_company_centroids is None or len(self._company_centroid_map) == 0:
             return []
@@ -630,10 +606,7 @@ class FAISSIndexManager:
             raise IndexNotBuiltError("Cannot add to unbuilt index")
 
         if len(embeddings) != len(uuids):
-            raise ValueError(
-                f"embeddings ({len(embeddings)}) and uuids ({len(uuids)}) "
-                "must have same length"
-            )
+            raise ValueError(f"embeddings ({len(embeddings)}) and uuids ({len(uuids)}) " "must have same length")
 
         # Get current max index
         current_max = max(self.idx_to_uuid.keys()) if self.idx_to_uuid else -1
@@ -672,10 +645,7 @@ class FAISSIndexManager:
                 removed_count += 1
 
         if removed_count > 0:
-            logger.warning(
-                f"Marked {removed_count} jobs as removed. "
-                "Call rebuild_job_index() to reclaim space."
-            )
+            logger.warning(f"Marked {removed_count} jobs as removed. " "Call rebuild_job_index() to reclaim space.")
 
     # =========================================================================
     # Persistence
@@ -707,10 +677,7 @@ class FAISSIndexManager:
             )
 
             # Save UUID mappings as ordered list
-            ordered_uuids = [
-                self.idx_to_uuid[i]
-                for i in range(len(self.idx_to_uuid))
-            ]
+            ordered_uuids = [self.idx_to_uuid[i] for i in range(len(self.idx_to_uuid))]
             np.save(self.index_dir / "jobs_uuids.npy", ordered_uuids)
 
             logger.info(f"Saved job index with {len(ordered_uuids)} vectors")
@@ -789,8 +756,7 @@ class FAISSIndexManager:
             saved_version = metadata.get("model_version", "unknown")
             if saved_version != self.model_version:
                 raise IndexCompatibilityError(
-                    f"Index model version '{saved_version}' doesn't match "
-                    f"current version '{self.model_version}'"
+                    f"Index model version '{saved_version}' doesn't match " f"current version '{self.model_version}'"
                 )
 
             self._nlist = metadata.get("nlist", 0)
@@ -883,9 +849,7 @@ class FAISSIndexManager:
             }
 
             # Estimate memory usage (32-bit floats)
-            job_stats["estimated_memory_mb"] = (
-                job_index.ntotal * self.DIMENSION * 4 / (1024 * 1024)
-            )
+            job_stats["estimated_memory_mb"] = job_index.ntotal * self.DIMENSION * 4 / (1024 * 1024)
 
             stats["indexes"]["jobs"] = job_stats
 
@@ -901,9 +865,7 @@ class FAISSIndexManager:
             stats["indexes"]["companies"] = {
                 "total_companies": len(self.company_names),
                 "total_centroids": self.indexes["companies"].ntotal,
-                "avg_centroids_per_company": (
-                    self.indexes["companies"].ntotal / max(1, len(self.company_names))
-                ),
+                "avg_centroids_per_company": (self.indexes["companies"].ntotal / max(1, len(self.company_names))),
                 "index_type": type(self.indexes["companies"]).__name__,
             }
 
@@ -938,7 +900,7 @@ class FAISSIndexManager:
             Recommended nlist value
         """
         nlist = int(np.sqrt(n_vectors))
-        nlist = max(nlist, 16)    # Minimum for small datasets
+        nlist = max(nlist, 16)  # Minimum for small datasets
         nlist = min(nlist, 4096)  # Maximum practical value
         return nlist
 

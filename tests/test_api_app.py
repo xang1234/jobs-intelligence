@@ -11,7 +11,6 @@ from fastapi.testclient import TestClient
 
 from src.api.app import create_app, get_engine
 
-
 # =============================================================================
 # Fixtures
 # =============================================================================
@@ -105,12 +104,8 @@ def _make_mock_engine(degraded=False, loaded=True):
             {"skill": "Django", "similarity": 0.65, "same_cluster": False},
         ],
     }
-    engine.db.get_popular_queries.return_value = [
-        {"query": "data scientist", "count": 42}
-    ]
-    engine.db.get_search_latency_percentiles.return_value = {
-        "p50": 30.0, "p90": 80.0, "p95": 100.0, "p99": 200.0
-    }
+    engine.db.get_popular_queries.return_value = [{"query": "data scientist", "count": 42}]
+    engine.db.get_search_latency_percentiles.return_value = {"p50": 30.0, "p90": 80.0, "p95": 100.0, "p99": 200.0}
     engine.db.get_overview.return_value = {
         "headline_metrics": {
             "total_jobs": 50000,
@@ -138,19 +133,49 @@ def _make_mock_engine(degraded=False, loaded=True):
         {
             "skill": "Python",
             "series": [
-                {"month": "2026-01", "job_count": 10, "market_share": 5.0, "median_salary_annual": 150000, "momentum": 0.0},
-                {"month": "2026-02", "job_count": 14, "market_share": 6.2, "median_salary_annual": 155000, "momentum": 40.0},
+                {
+                    "month": "2026-01",
+                    "job_count": 10,
+                    "market_share": 5.0,
+                    "median_salary_annual": 150000,
+                    "momentum": 0.0,
+                },
+                {
+                    "month": "2026-02",
+                    "job_count": 14,
+                    "market_share": 6.2,
+                    "median_salary_annual": 155000,
+                    "momentum": 40.0,
+                },
             ],
-            "latest": {"month": "2026-02", "job_count": 14, "market_share": 6.2, "median_salary_annual": 155000, "momentum": 40.0},
+            "latest": {
+                "month": "2026-02",
+                "job_count": 14,
+                "market_share": 6.2,
+                "median_salary_annual": 155000,
+                "momentum": 40.0,
+            },
         },
     ]
     engine.db.get_role_trend.return_value = {
         "query": "data scientist",
         "series": [
             {"month": "2026-01", "job_count": 9, "market_share": 4.0, "median_salary_annual": 148000, "momentum": 0.0},
-            {"month": "2026-02", "job_count": 15, "market_share": 6.4, "median_salary_annual": 160000, "momentum": 50.0},
+            {
+                "month": "2026-02",
+                "job_count": 15,
+                "market_share": 6.4,
+                "median_salary_annual": 160000,
+                "momentum": 50.0,
+            },
         ],
-        "latest": {"month": "2026-02", "job_count": 15, "market_share": 6.4, "median_salary_annual": 160000, "momentum": 50.0},
+        "latest": {
+            "month": "2026-02",
+            "job_count": 15,
+            "market_share": 6.4,
+            "median_salary_annual": 160000,
+            "momentum": 50.0,
+        },
     }
     engine.db.get_company_trend.return_value = {
         "company_name": "TestCo",
@@ -190,6 +215,7 @@ def mock_engine():
 def client(mock_engine):
     """TestClient with mocked search engine (lifespan disabled)."""
     import sys
+
     app_module = sys.modules["src.api.app"]
 
     app = _create_test_app(mock_engine)
@@ -203,6 +229,7 @@ def client(mock_engine):
 def client_no_engine():
     """TestClient with no search engine (simulates engine not initialized)."""
     import sys
+
     app_module = sys.modules["src.api.app"]
 
     app = create_app()
@@ -228,6 +255,7 @@ class TestHealthEndpoint:
 
     def test_degraded(self):
         import sys
+
         app_module = sys.modules["src.api.app"]
 
         engine = _make_mock_engine(degraded=True)
@@ -268,14 +296,17 @@ class TestSearchEndpoint:
         mock_engine.search.assert_called_once()
 
     def test_search_with_filters(self, client, mock_engine):
-        resp = client.post("/api/search", json={
-            "query": "data scientist",
-            "limit": 20,
-            "salary_min": 8000,
-            "salary_max": 15000,
-            "employment_type": "Full Time",
-            "alpha": 0.5,
-        })
+        resp = client.post(
+            "/api/search",
+            json={
+                "query": "data scientist",
+                "limit": 20,
+                "salary_min": 8000,
+                "salary_max": 15000,
+                "employment_type": "Full Time",
+                "alpha": 0.5,
+            },
+        )
         assert resp.status_code == 200
         call_args = mock_engine.search.call_args[0][0]
         assert call_args.query == "data scientist"
@@ -312,11 +343,14 @@ class TestSimilarEndpoint:
         mock_engine.find_similar.assert_called_once()
 
     def test_similar_with_options(self, client, mock_engine):
-        resp = client.post("/api/similar", json={
-            "job_uuid": "abc-123",
-            "limit": 5,
-            "exclude_same_company": True,
-        })
+        resp = client.post(
+            "/api/similar",
+            json={
+                "job_uuid": "abc-123",
+                "limit": 5,
+                "exclude_same_company": True,
+            },
+        )
         assert resp.status_code == 200
         call_args = mock_engine.find_similar.call_args[0][0]
         assert call_args.job_uuid == "abc-123"
@@ -331,10 +365,13 @@ class TestSimilarEndpoint:
 
 class TestBatchSimilarEndpoint:
     def test_batch_similar(self, client, mock_engine):
-        resp = client.post("/api/similar/batch", json={
-            "job_uuids": ["uuid-1", "uuid-2"],
-            "limit_per_job": 3,
-        })
+        resp = client.post(
+            "/api/similar/batch",
+            json={
+                "job_uuids": ["uuid-1", "uuid-2"],
+                "limit_per_job": 3,
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert "uuid-1" in data["results"]
@@ -342,9 +379,12 @@ class TestBatchSimilarEndpoint:
         assert data["search_time_ms"] > 0
 
     def test_batch_calls_engine_per_uuid(self, client, mock_engine):
-        resp = client.post("/api/similar/batch", json={
-            "job_uuids": ["a", "b", "c"],
-        })
+        resp = client.post(
+            "/api/similar/batch",
+            json={
+                "job_uuids": ["a", "b", "c"],
+            },
+        )
         assert resp.status_code == 200
         assert mock_engine.find_similar.call_count == 3
 
@@ -448,9 +488,12 @@ class TestRelatedSkillsEndpoint:
 
 class TestCompanySimilarityEndpoint:
     def test_similar_companies(self, client, mock_engine):
-        resp = client.post("/api/companies/similar", json={
-            "company_name": "Google",
-        })
+        resp = client.post(
+            "/api/companies/similar",
+            json={
+                "company_name": "Google",
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 1
@@ -458,9 +501,12 @@ class TestCompanySimilarityEndpoint:
         assert data[0]["similarity_score"] == 0.85
 
     def test_empty_company_rejected(self, client):
-        resp = client.post("/api/companies/similar", json={
-            "company_name": "",
-        })
+        resp = client.post(
+            "/api/companies/similar",
+            json={
+                "company_name": "",
+            },
+        )
         assert resp.status_code == 422
 
 
@@ -494,11 +540,14 @@ class TestMarketIntelligenceEndpoints:
         assert data["similar_companies"][0]["company_name"] == "SimilarCo"
 
     def test_profile_match(self, client, mock_engine):
-        resp = client.post("/api/match/profile", json={
-            "profile_text": "Senior analytics leader with Python and SQL experience across ML platforms.",
-            "target_titles": ["Data Scientist"],
-            "salary_expectation_annual": 180000,
-        })
+        resp = client.post(
+            "/api/match/profile",
+            json={
+                "profile_text": "Senior analytics leader with Python and SQL experience across ML platforms.",
+                "target_titles": ["Data Scientist"],
+                "salary_expectation_annual": 180000,
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["extracted_skills"] == ["Python", "SQL"]

@@ -21,12 +21,12 @@ import hashlib
 import logging
 import sqlite3
 from dataclasses import dataclass
-from typing import Optional, Callable, Awaitable
+from typing import Awaitable, Callable, Optional
 
 from tenacity import RetryError
 
-from .api_client import MCFClient, MCFNotFoundError, MCFRateLimitError, MCFAPIError
 from .adaptive_rate import AdaptiveRateLimiter
+from .api_client import MCFAPIError, MCFClient, MCFNotFoundError, MCFRateLimitError
 from .batch_logger import BatchLogger
 from .database import MCFDatabase
 from .models import Job
@@ -59,6 +59,7 @@ MAX_SEQUENCE = 9_999_999
 @dataclass
 class ScrapeProgress:
     """Progress information for a scraping session."""
+
     year: int
     current_seq: int
     jobs_found: int
@@ -265,14 +266,8 @@ class HistoricalScraper:
         if retry_count < self.max_rate_limit_retries:
             return True
 
-        message = (
-            f"rate_limited_after_{retry_count}_retries"
-            f" at {new_rps:.2f} req/sec"
-        )
-        logger.warning(
-            f"Skipping seq {sequence} for year {year} after {retry_count} 429s; "
-            "recording for retry-gaps"
-        )
+        message = f"rate_limited_after_{retry_count}_retries" f" at {new_rps:.2f} req/sec"
+        logger.warning(f"Skipping seq {sequence} for year {year} after {retry_count} 429s; " "recording for retry-gaps")
         if log_failure:
             self.batch_logger.log(year, sequence, "rate_limited", message)
         return False
@@ -463,8 +458,7 @@ class HistoricalScraper:
         checkpoint_interval = 100  # Save progress every N jobs
 
         logger.info(
-            f"Scraping year {year}: sequences {start_seq:,} to {end_seq:,}"
-            f"{' (DRY RUN)' if dry_run else ''}"
+            f"Scraping year {year}: sequences {start_seq:,} to {end_seq:,}" f"{' (DRY RUN)' if dry_run else ''}"
         )
         logger.info(f"Rate limiter: {self.rate_limiter.current_rps:.2f} req/sec")
 
@@ -474,8 +468,7 @@ class HistoricalScraper:
                 # Check for early termination
                 if consecutive_not_found >= self.not_found_threshold:
                     logger.info(
-                        f"Year {year}: {consecutive_not_found} consecutive not-found, "
-                        "assuming end of sequence"
+                        f"Year {year}: {consecutive_not_found} consecutive not-found, " "assuming end of sequence"
                     )
                     break
 
@@ -484,10 +477,10 @@ class HistoricalScraper:
                     uuid = self._job_uuid(year, current_seq)
                     if self.db.has_job(uuid):
                         jobs_found += 1
-                        self.batch_logger.log(year, current_seq, 'skipped')
+                        self.batch_logger.log(year, current_seq, "skipped")
                     else:
                         jobs_not_found += 1
-                        self.batch_logger.log(year, current_seq, 'not_found')
+                        self.batch_logger.log(year, current_seq, "not_found")
                     current_seq += 1
                     rate_limit_retries = 0
                     continue
@@ -502,7 +495,7 @@ class HistoricalScraper:
                         consecutive_not_found = 0
 
                         # Log successful fetch
-                        self.batch_logger.log(year, current_seq, 'found')
+                        self.batch_logger.log(year, current_seq, "found")
                         self.rate_limiter.on_success()
                         self._reset_rate_limit_streak()
 
@@ -514,7 +507,7 @@ class HistoricalScraper:
                     else:
                         jobs_not_found += 1
                         consecutive_not_found += 1
-                        self.batch_logger.log(year, current_seq, 'not_found')
+                        self.batch_logger.log(year, current_seq, "not_found")
                         self.rate_limiter.on_success()
                         self._reset_rate_limit_streak()
                         self._update_client_rate(self.rate_limiter.current_rps)
@@ -522,17 +515,14 @@ class HistoricalScraper:
                 except MCFRateLimitError:
                     rate_limit_retries += 1
                     should_retry = await self._handle_rate_limit(
-                        year,
-                        current_seq,
-                        retry_count=rate_limit_retries,
-                        context="Rate limited"
+                        year, current_seq, retry_count=rate_limit_retries, context="Rate limited"
                     )
                     if should_retry:
                         continue
 
                 except MCFAPIError as e:
                     logger.error(f"API error at {year}-{current_seq}: {e}")
-                    self.batch_logger.log(year, current_seq, 'error', str(e))
+                    self.batch_logger.log(year, current_seq, "error", str(e))
                     self.rate_limiter.on_error()
                     jobs_not_found += 1
                     consecutive_not_found += 1
@@ -553,7 +543,7 @@ class HistoricalScraper:
                     else:
                         # Other retry error - log and continue
                         logger.error(f"Retry exhausted at {year}-{current_seq}: {e}")
-                        self.batch_logger.log(year, current_seq, 'error', str(e))
+                        self.batch_logger.log(year, current_seq, "error", str(e))
                         self.rate_limiter.on_error()
                         jobs_not_found += 1
                         consecutive_not_found += 1
@@ -561,7 +551,7 @@ class HistoricalScraper:
                 except Exception as e:
                     # Catch-all for unexpected errors - log and continue
                     logger.exception(f"Unexpected error at {year}-{current_seq}: {e}")
-                    self.batch_logger.log(year, current_seq, 'error', str(e))
+                    self.batch_logger.log(year, current_seq, "error", str(e))
                     self.rate_limiter.on_error()
                     jobs_not_found += 1
                     consecutive_not_found += 1
@@ -821,7 +811,7 @@ class HistoricalScraper:
                     if job:
                         is_new, _ = self.db.upsert_job(job, conn=self._write_conn)
                         jobs_found += 1
-                        self.batch_logger.log(year, seq, 'found')
+                        self.batch_logger.log(year, seq, "found")
                         self.rate_limiter.on_success()
                         self._reset_rate_limit_streak()
                         self._update_client_rate(self.rate_limiter.current_rps)
@@ -829,7 +819,7 @@ class HistoricalScraper:
                         if is_new:
                             logger.debug(f"Recovered job: {job.title[:50]}")
                     else:
-                        self.batch_logger.log(year, seq, 'not_found')
+                        self.batch_logger.log(year, seq, "not_found")
                         jobs_not_found += 1
                         self.rate_limiter.on_success()
                         self._reset_rate_limit_streak()
@@ -849,7 +839,7 @@ class HistoricalScraper:
                     break
 
                 except MCFAPIError as e:
-                    self.batch_logger.log(year, seq, 'error', str(e))
+                    self.batch_logger.log(year, seq, "error", str(e))
                     self.rate_limiter.on_error()
                     jobs_not_found += 1
                     break
@@ -876,8 +866,7 @@ class HistoricalScraper:
         self._mark_progress_committed()
 
         logger.info(
-            f"Gap retry complete for year {year}: "
-            f"{jobs_found:,} recovered, {jobs_not_found:,} still missing"
+            f"Gap retry complete for year {year}: " f"{jobs_found:,} recovered, {jobs_not_found:,} still missing"
         )
 
         return ScrapeProgress(

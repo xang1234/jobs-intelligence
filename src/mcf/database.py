@@ -18,11 +18,11 @@ from collections import Counter, defaultdict
 from contextlib import contextmanager
 from datetime import date, datetime
 from pathlib import Path
-from typing import Optional, Iterator, Any
+from typing import Any, Iterator, Optional
 
 import numpy as np
 
-from .models import Job, Checkpoint
+from .models import Job
 
 logger = logging.getLogger(__name__)
 
@@ -412,9 +412,7 @@ class MCFDatabase:
 
         try:
             # Check if job exists
-            existing = conn.execute(
-                "SELECT * FROM jobs WHERE uuid = ?", (job.uuid,)
-            ).fetchone()
+            existing = conn.execute("SELECT * FROM jobs WHERE uuid = ?", (job.uuid,)).fetchone()
 
             if existing is None:
                 # New job - insert
@@ -450,9 +448,7 @@ class MCFDatabase:
             if owns_connection:
                 conn.close()
 
-    def _insert_job(
-        self, conn: sqlite3.Connection, job_data: dict, timestamp: str
-    ) -> None:
+    def _insert_job(self, conn: sqlite3.Connection, job_data: dict, timestamp: str) -> None:
         """Insert a new job record."""
         # Calculate annual salary for consistent comparisons
         data = {**job_data, "first_seen_at": timestamp, "last_updated_at": timestamp}
@@ -483,9 +479,7 @@ class MCFDatabase:
             data,
         )
 
-    def _update_job(
-        self, conn: sqlite3.Connection, job_data: dict, timestamp: str
-    ) -> None:
+    def _update_job(self, conn: sqlite3.Connection, job_data: dict, timestamp: str) -> None:
         """Update an existing job record."""
         # Calculate annual salary for consistent comparisons
         data = {**job_data, "last_updated_at": timestamp}
@@ -550,7 +544,7 @@ class MCFDatabase:
             "Monthly": 12,
             "Yearly": 1,
             "Hourly": 2080,  # 40 hours × 52 weeks
-            "Daily": 260,   # 5 days × 52 weeks
+            "Daily": 260,  # 5 days × 52 weeks
         }
         multiplier = multipliers.get(salary_type, 12)  # Default to monthly
 
@@ -619,9 +613,7 @@ class MCFDatabase:
             Job data as dict, or None if not found
         """
         with self._connection() as conn:
-            row = conn.execute(
-                "SELECT * FROM jobs WHERE uuid = ?", (uuid,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM jobs WHERE uuid = ?", (uuid,)).fetchone()
             return dict(row) if row else None
 
     def get_jobs_bulk(self, uuids: list[str]) -> dict[str, dict]:
@@ -708,9 +700,7 @@ class MCFDatabase:
         params: list[Any] = []
 
         if keyword:
-            conditions.append(
-                "(title LIKE ? OR description LIKE ? OR skills LIKE ?)"
-            )
+            conditions.append("(title LIKE ? OR description LIKE ? OR skills LIKE ?)")
             like_pattern = f"%{keyword}%"
             params.extend([like_pattern, like_pattern, like_pattern])
 
@@ -759,9 +749,7 @@ class MCFDatabase:
             stats = {}
 
             # Total jobs
-            stats["total_jobs"] = conn.execute(
-                "SELECT COUNT(*) FROM jobs"
-            ).fetchone()[0]
+            stats["total_jobs"] = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
 
             # Jobs by employment type
             rows = conn.execute(
@@ -807,14 +795,10 @@ class MCFDatabase:
             }
 
             # History count
-            stats["history_records"] = conn.execute(
-                "SELECT COUNT(*) FROM job_history"
-            ).fetchone()[0]
+            stats["history_records"] = conn.execute("SELECT COUNT(*) FROM job_history").fetchone()[0]
 
             # Jobs with history
-            stats["jobs_with_history"] = conn.execute(
-                "SELECT COUNT(DISTINCT job_uuid) FROM job_history"
-            ).fetchone()[0]
+            stats["jobs_with_history"] = conn.execute("SELECT COUNT(DISTINCT job_uuid) FROM job_history").fetchone()[0]
 
             # Recent activity
             stats["jobs_added_today"] = conn.execute(
@@ -837,9 +821,7 @@ class MCFDatabase:
     def has_job(self, uuid: str) -> bool:
         """Check if a job with the given UUID exists."""
         with self._connection() as conn:
-            row = conn.execute(
-                "SELECT 1 FROM jobs WHERE uuid = ? LIMIT 1", (uuid,)
-            ).fetchone()
+            row = conn.execute("SELECT 1 FROM jobs WHERE uuid = ? LIMIT 1", (uuid,)).fetchone()
             return row is not None
 
     def get_all_uuids(self) -> set[str]:
@@ -1456,7 +1438,7 @@ class MCFDatabase:
             current_seq: Current sequence being scraped
         """
         with self._connection() as conn:
-            if status == 'running':
+            if status == "running":
                 conn.execute(
                     """
                     UPDATE daemon_state
@@ -1519,9 +1501,7 @@ class MCFDatabase:
             - current_year, current_seq
         """
         with self._connection() as conn:
-            row = conn.execute(
-                "SELECT * FROM daemon_state WHERE id = 1"
-            ).fetchone()
+            row = conn.execute("SELECT * FROM daemon_state WHERE id = 1").fetchone()
 
             if row:
                 return dict(row)
@@ -1663,9 +1643,7 @@ class MCFDatabase:
         with self._connection() as conn:
             # Count by type
             type_counts = {}
-            for row in conn.execute(
-                "SELECT entity_type, COUNT(*) FROM embeddings GROUP BY entity_type"
-            ):
+            for row in conn.execute("SELECT entity_type, COUNT(*) FROM embeddings GROUP BY entity_type"):
                 type_counts[row[0]] = row[1]
 
             # Job coverage
@@ -1673,18 +1651,14 @@ class MCFDatabase:
             jobs_with_embeddings = type_counts.get("job", 0)
 
             # Model version
-            model = conn.execute(
-                "SELECT model_version FROM embeddings LIMIT 1"
-            ).fetchone()
+            model = conn.execute("SELECT model_version FROM embeddings LIMIT 1").fetchone()
 
         return {
             "job_embeddings": type_counts.get("job", 0),
             "skill_embeddings": type_counts.get("skill", 0),
             "company_embeddings": type_counts.get("company", 0),
             "total_jobs": total_jobs,
-            "coverage_pct": (jobs_with_embeddings / total_jobs * 100)
-            if total_jobs > 0
-            else 0,
+            "coverage_pct": (jobs_with_embeddings / total_jobs * 100) if total_jobs > 0 else 0,
             "model_version": model[0] if model else None,
         }
 
@@ -1730,10 +1704,7 @@ class MCFDatabase:
             raise ValueError("entity_ids and embeddings must have same length")
 
         model = model_version or "all-MiniLM-L6-v2"
-        data = [
-            (eid, entity_type, emb.astype(np.float32).tobytes(), model)
-            for eid, emb in zip(entity_ids, embeddings)
-        ]
+        data = [(eid, entity_type, emb.astype(np.float32).tobytes(), model) for eid, emb in zip(entity_ids, embeddings)]
 
         with self._connection() as conn:
             conn.executemany(
@@ -1779,9 +1750,7 @@ class MCFDatabase:
 
         return [(row[0], row[1]) for row in rows]
 
-    def bm25_search_filtered(
-        self, query: str, candidate_uuids: set[str]
-    ) -> list[tuple[str, float]]:
+    def bm25_search_filtered(self, query: str, candidate_uuids: set[str]) -> list[tuple[str, float]]:
         """
         Full-text search restricted to a set of candidate UUIDs.
 
@@ -1804,9 +1773,7 @@ class MCFDatabase:
             # Use a temp table for efficient JOIN with the FTS index.
             # This lets SQLite compute BM25 only for matching candidates
             # rather than ranking the entire corpus first.
-            conn.execute(
-                "CREATE TEMP TABLE IF NOT EXISTS _bm25_candidates (uuid TEXT PRIMARY KEY)"
-            )
+            conn.execute("CREATE TEMP TABLE IF NOT EXISTS _bm25_candidates (uuid TEXT PRIMARY KEY)")
             conn.execute("DELETE FROM _bm25_candidates")
             conn.executemany(
                 "INSERT INTO _bm25_candidates (uuid) VALUES (?)",
@@ -1899,10 +1866,7 @@ class MCFDatabase:
                 (f"-{days} days", limit),
             ).fetchall()
 
-        return [
-            {"query": r[0], "count": r[1], "avg_latency_ms": r[2]}
-            for r in rows
-        ]
+        return [{"query": r[0], "count": r[1], "avg_latency_ms": r[2]} for r in rows]
 
     def get_search_latency_percentiles(self, days: int = 7) -> dict:
         """
@@ -2182,9 +2146,7 @@ class MCFDatabase:
             points[label]["median_salary_annual"] = self._median(salary_buckets[label])
             market_total = (market_counts or {}).get(label, 0)
             if market_total > 0:
-                points[label]["market_share"] = round(
-                    (points[label]["job_count"] / market_total) * 100, 2
-                )
+                points[label]["market_share"] = round((points[label]["job_count"] / market_total) * 100, 2)
 
         series = [points[label] for label in labels]
         self._annotate_momentum(series)
@@ -2205,9 +2167,7 @@ class MCFDatabase:
             point = {
                 "month": label,
                 "job_count": job_count,
-                "market_share": round((job_count / market_total) * 100, 2)
-                if market_total > 0
-                else 0.0,
+                "market_share": round((job_count / market_total) * 100, 2) if market_total > 0 else 0.0,
                 "median_salary_annual": self._median(salary_buckets.get(label, [])),
                 "momentum": 0.0,
             }
@@ -2289,9 +2249,7 @@ class MCFDatabase:
         market_counts = self._get_market_monthly_counts(months=months)
         series = self._rows_to_series(rows, months, market_counts)
 
-        skills_by_month: dict[str, Counter] = {
-            label: Counter() for label in self._month_labels(months)
-        }
+        skills_by_month: dict[str, Counter] = {label: Counter() for label in self._month_labels(months)}
         for row in rows:
             month = row["posted_date"][:7]
             raw_skills = row["skills"] or ""
@@ -2302,8 +2260,7 @@ class MCFDatabase:
             {
                 "month": month,
                 "skills": [
-                    {"skill": skill, "job_count": count, "cluster_id": None}
-                    for skill, count in counter.most_common(5)
+                    {"skill": skill, "job_count": count, "cluster_id": None} for skill, count in counter.most_common(5)
                 ],
             }
             for month, counter in skills_by_month.items()
@@ -2325,13 +2282,9 @@ class MCFDatabase:
         market_counts: Counter = Counter()
         market_salarys: dict[str, list[int]] = {label: [] for label in labels}
         skill_counts: dict[str, Counter] = defaultdict(Counter)
-        skill_salarys: dict[str, dict[str, list[int]]] = defaultdict(
-            lambda: {label: [] for label in labels}
-        )
+        skill_salarys: dict[str, dict[str, list[int]]] = defaultdict(lambda: {label: [] for label in labels})
         company_counts: dict[str, Counter] = defaultdict(Counter)
-        company_salarys: dict[str, dict[str, list[int]]] = defaultdict(
-            lambda: {label: [] for label in labels}
-        )
+        company_salarys: dict[str, dict[str, list[int]]] = defaultdict(lambda: {label: [] for label in labels})
         unique_skills: set[str] = set()
         unique_companies: set[str] = set()
         salary_midpoints: list[int] = []
@@ -2369,10 +2322,7 @@ class MCFDatabase:
         )
 
         top_skills = sorted(
-            (
-                skill for skill, counts in skill_counts.items()
-                if sum(counts.values()) >= 10
-            ),
+            (skill for skill, counts in skill_counts.items() if sum(counts.values()) >= 10),
             key=lambda skill: sum(skill_counts[skill].values()),
             reverse=True,
         )[:30]
@@ -2436,9 +2386,15 @@ class MCFDatabase:
                 "label": "Monthly hiring velocity",
                 "value": market_counts.get(current_month, 0),
                 "delta": round(
-                    ((market_counts.get(current_month, 0) - market_counts.get(previous_month, 0)) / market_counts.get(previous_month, 0)) * 100,
+                    (
+                        (market_counts.get(current_month, 0) - market_counts.get(previous_month, 0))
+                        / market_counts.get(previous_month, 0)
+                    )
+                    * 100,
                     2,
-                ) if market_counts.get(previous_month, 0) else (100.0 if market_counts.get(current_month, 0) else 0.0),
+                )
+                if market_counts.get(previous_month, 0)
+                else (100.0 if market_counts.get(current_month, 0) else 0.0),
             },
             {
                 "label": "Average annual salary",
@@ -2543,9 +2499,7 @@ class MCFDatabase:
             Sorted list of unique skill names
         """
         with self._connection() as conn:
-            rows = conn.execute(
-                "SELECT DISTINCT skills FROM jobs WHERE skills IS NOT NULL AND skills != ''"
-            ).fetchall()
+            rows = conn.execute("SELECT DISTINCT skills FROM jobs WHERE skills IS NOT NULL AND skills != ''").fetchall()
 
         skills_set: set[str] = set()
         for row in rows:
@@ -2554,9 +2508,7 @@ class MCFDatabase:
 
         return sorted(list(skills_set))
 
-    def get_skill_frequencies(
-        self, min_jobs: int = 1, limit: int = 100
-    ) -> list[tuple[str, int]]:
+    def get_skill_frequencies(self, min_jobs: int = 1, limit: int = 100) -> list[tuple[str, int]]:
         """
         Get skill frequencies for visualization.
 
@@ -2568,20 +2520,14 @@ class MCFDatabase:
             List of (skill_name, count) tuples, sorted by frequency descending
         """
         with self._connection() as conn:
-            rows = conn.execute(
-                "SELECT skills FROM jobs WHERE skills IS NOT NULL AND skills != ''"
-            ).fetchall()
+            rows = conn.execute("SELECT skills FROM jobs WHERE skills IS NOT NULL AND skills != ''").fetchall()
 
         skill_counts: Counter = Counter()
         for row in rows:
             skills = [s.strip() for s in row[0].split(",")]
             skill_counts.update(s for s in skills if s)
 
-        filtered = [
-            (skill, count)
-            for skill, count in skill_counts.items()
-            if count >= min_jobs
-        ]
+        filtered = [(skill, count) for skill, count in skill_counts.items() if count >= min_jobs]
         filtered.sort(key=lambda x: x[1], reverse=True)
 
         return filtered[:limit]

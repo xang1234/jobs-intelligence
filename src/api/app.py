@@ -25,6 +25,8 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from ..mcf.embeddings import SemanticSearchEngine
+from ..mcf.embeddings.models import SimilarJobsRequest as InternalSimilarJobsRequest
 from .middleware import RateLimitMiddleware, RequestLoggingMiddleware
 from .models import (
     CompanySimilarity,
@@ -44,22 +46,20 @@ from .models import (
     RelatedSkillsResponse,
     RoleTrendRequest,
     RoleTrendResponse,
+    SalaryMovement,
     SearchRequest,
     SearchResponse,
-    SalaryMovement,
     SimilarBatchRequest,
     SimilarBatchResponse,
     SimilarJobsRequest,
-    SkillTrendRequest,
-    SkillTrendSeries,
     SkillCloudItem,
     SkillCloudResponse,
     SkillSearchRequest,
+    SkillTrendRequest,
+    SkillTrendSeries,
     StatsResponse,
     TrendPoint,
 )
-from ..mcf.embeddings import SemanticSearchEngine
-from ..mcf.embeddings.models import SimilarJobsRequest as InternalSimilarJobsRequest
 
 logger = logging.getLogger(__name__)
 
@@ -236,9 +236,7 @@ def _register_routes(app: FastAPI) -> None:
         """Find jobs similar to a given job UUID."""
         internal_req = request.to_internal()
         loop = asyncio.get_running_loop()
-        internal_resp = await loop.run_in_executor(
-            None, engine.find_similar, internal_req
-        )
+        internal_resp = await loop.run_in_executor(None, engine.find_similar, internal_req)
         return SearchResponse.from_internal(internal_resp)
 
     @app.post("/api/similar/batch", response_model=SimilarBatchResponse)
@@ -259,9 +257,7 @@ def _register_routes(app: FastAPI) -> None:
                 limit=request.limit_per_job,
                 exclude_same_company=request.exclude_same_company,
             )
-            resp = await loop.run_in_executor(
-                None, engine.find_similar, internal_req
-            )
+            resp = await loop.run_in_executor(None, engine.find_similar, internal_req)
             return (
                 uuid,
                 [JobResult.from_internal(r) for r in resp.results],
@@ -284,9 +280,7 @@ def _register_routes(app: FastAPI) -> None:
         """Search jobs by skill similarity."""
         internal_req = request.to_internal()
         loop = asyncio.get_running_loop()
-        internal_resp = await loop.run_in_executor(
-            None, engine.search_by_skill, internal_req
-        )
+        internal_resp = await loop.run_in_executor(None, engine.search_by_skill, internal_req)
         return SearchResponse.from_internal(internal_resp)
 
     # -- Skill feature endpoints ------------------------------------------------
@@ -304,9 +298,7 @@ def _register_routes(app: FastAPI) -> None:
         Useful for word clouds, bar charts, or skill distribution analysis.
         """
         loop = asyncio.get_running_loop()
-        raw = await loop.run_in_executor(
-            None, partial(engine.get_skill_cloud, min_jobs=min_jobs, limit=limit)
-        )
+        raw = await loop.run_in_executor(None, partial(engine.get_skill_cloud, min_jobs=min_jobs, limit=limit))
         return SkillCloudResponse(
             items=[SkillCloudItem(**item) for item in raw["items"]],
             total_unique_skills=raw["total_unique_skills"],
@@ -325,9 +317,7 @@ def _register_routes(app: FastAPI) -> None:
         Falls back to cluster-only lookup when the skill index is unavailable.
         """
         loop = asyncio.get_running_loop()
-        raw = await loop.run_in_executor(
-            None, partial(engine.get_related_skills, skill=skill, k=k)
-        )
+        raw = await loop.run_in_executor(None, partial(engine.get_related_skills, skill=skill, k=k))
         if raw is None:
             raise HTTPException(status_code=404, detail=f"Unknown skill: {skill}")
         return RelatedSkillsResponse(
@@ -345,9 +335,7 @@ def _register_routes(app: FastAPI) -> None:
         """Find companies with similar job profiles."""
         internal_req = request.to_internal()
         loop = asyncio.get_running_loop()
-        internal_results = await loop.run_in_executor(
-            None, engine.find_similar_companies, internal_req
-        )
+        internal_results = await loop.run_in_executor(None, engine.find_similar_companies, internal_req)
         return [CompanySimilarity.from_internal(r) for r in internal_results]
 
     # -- Market intelligence endpoints ----------------------------------------
@@ -359,9 +347,7 @@ def _register_routes(app: FastAPI) -> None:
     ) -> OverviewResponse:
         """Get summary cards and top movers for the overview page."""
         loop = asyncio.get_running_loop()
-        raw = await loop.run_in_executor(
-            None, partial(engine.db.get_overview, months=months)
-        )
+        raw = await loop.run_in_executor(None, partial(engine.db.get_overview, months=months))
         return OverviewResponse(
             headline_metrics=OverviewMetric(**raw["headline_metrics"]),
             rising_skills=[MomentumCard(**item) for item in raw["rising_skills"]],
@@ -430,9 +416,7 @@ def _register_routes(app: FastAPI) -> None:
         """Get hiring trend, skill mix, and similar employers for one company."""
         loop = asyncio.get_running_loop()
         trend_raw, similar_raw = await asyncio.gather(
-            loop.run_in_executor(
-                None, partial(engine.db.get_company_trend, company_name=company_name, months=months)
-            ),
+            loop.run_in_executor(None, partial(engine.db.get_company_trend, company_name=company_name, months=months)),
             loop.run_in_executor(
                 None,
                 partial(
@@ -510,9 +494,7 @@ def _register_routes(app: FastAPI) -> None:
     ) -> list[dict]:
         """Get most popular search queries."""
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None, partial(engine.db.get_popular_queries, days=days, limit=limit)
-        )
+        return await loop.run_in_executor(None, partial(engine.db.get_popular_queries, days=days, limit=limit))
 
     @app.get("/api/analytics/performance")
     async def performance_stats(
@@ -521,9 +503,7 @@ def _register_routes(app: FastAPI) -> None:
     ) -> dict:
         """Get search latency percentiles (p50, p90, p95, p99)."""
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None, partial(engine.db.get_search_latency_percentiles, days=days)
-        )
+        return await loop.run_in_executor(None, partial(engine.db.get_search_latency_percentiles, days=days))
 
     @app.get("/health", response_model=HealthResponse)
     async def health_check() -> HealthResponse:
@@ -554,7 +534,6 @@ _STATUS_CODES = {
 
 
 def _register_exception_handlers(app: FastAPI) -> None:
-
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):
         return JSONResponse(

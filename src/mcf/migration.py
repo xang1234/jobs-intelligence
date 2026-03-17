@@ -14,7 +14,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 from typing import Optional
 
@@ -22,14 +22,14 @@ import pandas as pd
 
 from .database import MCFDatabase
 from .models import (
+    Address,
+    Company,
+    EmploymentType,
     Job,
+    JobMetadata,
+    PositionLevel,
     Salary,
     SalaryType,
-    Company,
-    Address,
-    EmploymentType,
-    PositionLevel,
-    JobMetadata,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class MigrationError:
     """Record of a migration error."""
+
     source: str  # File path or identifier
     row: Optional[int]  # Row number if applicable
     error: str  # Error message
@@ -47,6 +48,7 @@ class MigrationError:
 @dataclass
 class MigrationStats:
     """Statistics from a migration run."""
+
     json_files_processed: int = 0
     csv_rows_processed: int = 0
     new_jobs: int = 0
@@ -94,23 +96,32 @@ class LegacyJobParser:
     APPLICATIONS_PATTERN = re.compile(r"(\d+)\s*applications?", re.IGNORECASE)
 
     # Date pattern: "Posted 26 May 2023" or "Closing on 09 Nov 2023"
-    DATE_PATTERN = re.compile(
-        r"(?:Posted|Closing on)\s+(\d{1,2})\s+(\w+)\s+(\d{4})", re.IGNORECASE
-    )
+    DATE_PATTERN = re.compile(r"(?:Posted|Closing on)\s+(\d{1,2})\s+(\w+)\s+(\d{4})", re.IGNORECASE)
 
     MONTH_MAP = {
-        "jan": 1, "january": 1,
-        "feb": 2, "february": 2,
-        "mar": 3, "march": 3,
-        "apr": 4, "april": 4,
+        "jan": 1,
+        "january": 1,
+        "feb": 2,
+        "february": 2,
+        "mar": 3,
+        "march": 3,
+        "apr": 4,
+        "april": 4,
         "may": 5,
-        "jun": 6, "june": 6,
-        "jul": 7, "july": 7,
-        "aug": 8, "august": 8,
-        "sep": 9, "september": 9,
-        "oct": 10, "october": 10,
-        "nov": 11, "november": 11,
-        "dec": 12, "december": 12,
+        "jun": 6,
+        "june": 6,
+        "jul": 7,
+        "july": 7,
+        "aug": 8,
+        "august": 8,
+        "sep": 9,
+        "september": 9,
+        "oct": 10,
+        "october": 10,
+        "nov": 11,
+        "november": 11,
+        "dec": 12,
+        "december": 12,
     }
 
     @classmethod
@@ -446,9 +457,7 @@ class MCFMigrator:
 
         return stats
 
-    def _migrate_json_files(
-        self, data_path: Path, stats: MigrationStats, dry_run: bool
-    ) -> None:
+    def _migrate_json_files(self, data_path: Path, stats: MigrationStats, dry_run: bool) -> None:
         """Process JSON files from scrape_jsons directory."""
         json_dir = data_path / "scrape_jsons"
         if not json_dir.exists():
@@ -462,11 +471,13 @@ class MCFMigrator:
             try:
                 uuid = self.parser.extract_uuid_from_filename(json_file.name)
                 if not uuid:
-                    stats.errors.append(MigrationError(
-                        source=str(json_file),
-                        row=None,
-                        error="Could not extract UUID from filename",
-                    ))
+                    stats.errors.append(
+                        MigrationError(
+                            source=str(json_file),
+                            row=None,
+                            error="Could not extract UUID from filename",
+                        )
+                    )
                     continue
 
                 # Skip if already seen
@@ -495,24 +506,21 @@ class MCFMigrator:
                 stats.json_files_processed += 1
 
             except Exception as e:
-                stats.errors.append(MigrationError(
-                    source=str(json_file),
-                    row=None,
-                    error=str(e),
-                ))
+                stats.errors.append(
+                    MigrationError(
+                        source=str(json_file),
+                        row=None,
+                        error=str(e),
+                    )
+                )
                 logger.debug(f"Error processing {json_file}: {e}")
 
         logger.info(f"Processed {stats.json_files_processed:,} JSON files")
 
-    def _migrate_full_csvs(
-        self, data_path: Path, stats: MigrationStats, dry_run: bool
-    ) -> None:
+    def _migrate_full_csvs(self, data_path: Path, stats: MigrationStats, dry_run: bool) -> None:
         """Process full MCF CSV files (16 columns)."""
         # Find MCF CSVs (not link-only, not LinkedIn)
-        csv_files = [
-            f for f in data_path.glob("mycareersfuture*.csv")
-            if "link" not in f.name.lower()
-        ]
+        csv_files = [f for f in data_path.glob("mycareersfuture*.csv") if "link" not in f.name.lower()]
 
         if not csv_files:
             logger.warning("No full MCF CSV files found")
@@ -529,11 +537,13 @@ class MCFMigrator:
                     try:
                         job = self.parser.build_job_from_csv_row(row.to_dict())
                         if not job:
-                            stats.errors.append(MigrationError(
-                                source=str(csv_file),
-                                row=idx,
-                                error="Could not parse row (missing UUID or title)",
-                            ))
+                            stats.errors.append(
+                                MigrationError(
+                                    source=str(csv_file),
+                                    row=idx,
+                                    error="Could not parse row (missing UUID or title)",
+                                )
+                            )
                             continue
 
                         # Skip if already seen
@@ -557,25 +567,27 @@ class MCFMigrator:
                         stats.csv_rows_processed += 1
 
                     except Exception as e:
-                        stats.errors.append(MigrationError(
-                            source=str(csv_file),
-                            row=idx,
-                            error=str(e),
-                        ))
+                        stats.errors.append(
+                            MigrationError(
+                                source=str(csv_file),
+                                row=idx,
+                                error=str(e),
+                            )
+                        )
 
             except Exception as e:
-                stats.errors.append(MigrationError(
-                    source=str(csv_file),
-                    row=None,
-                    error=f"Could not read CSV: {e}",
-                ))
+                stats.errors.append(
+                    MigrationError(
+                        source=str(csv_file),
+                        row=None,
+                        error=f"Could not read CSV: {e}",
+                    )
+                )
                 logger.warning(f"Error reading {csv_file}: {e}")
 
         logger.info(f"Processed {stats.csv_rows_processed:,} CSV rows")
 
-    def _migrate_link_only_csvs(
-        self, data_path: Path, stats: MigrationStats, dry_run: bool
-    ) -> None:
+    def _migrate_link_only_csvs(self, data_path: Path, stats: MigrationStats, dry_run: bool) -> None:
         """Process link-only CSV files (4 columns: Company, Title, Location, Link)."""
         csv_files = list(data_path.glob("mycareersfuture*link*.csv"))
 
@@ -594,11 +606,13 @@ class MCFMigrator:
                     try:
                         job = self.parser.build_job_from_link_only(row.to_dict())
                         if not job:
-                            stats.errors.append(MigrationError(
-                                source=str(csv_file),
-                                row=idx,
-                                error="Could not parse row (missing UUID or title)",
-                            ))
+                            stats.errors.append(
+                                MigrationError(
+                                    source=str(csv_file),
+                                    row=idx,
+                                    error="Could not parse row (missing UUID or title)",
+                                )
+                            )
                             continue
 
                         # Only insert if UUID not seen (link-only has minimal data)
@@ -624,20 +638,22 @@ class MCFMigrator:
                         stats.csv_rows_processed += 1
 
                     except Exception as e:
-                        stats.errors.append(MigrationError(
-                            source=str(csv_file),
-                            row=idx,
-                            error=str(e),
-                        ))
+                        stats.errors.append(
+                            MigrationError(
+                                source=str(csv_file),
+                                row=idx,
+                                error=str(e),
+                            )
+                        )
 
             except Exception as e:
-                stats.errors.append(MigrationError(
-                    source=str(csv_file),
-                    row=None,
-                    error=f"Could not read CSV: {e}",
-                ))
+                stats.errors.append(
+                    MigrationError(
+                        source=str(csv_file),
+                        row=None,
+                        error=f"Could not read CSV: {e}",
+                    )
+                )
                 logger.warning(f"Error reading {csv_file}: {e}")
 
-        logger.info(
-            f"Processed link-only CSVs: {stats.link_only_jobs:,} new minimal records"
-        )
+        logger.info(f"Processed link-only CSVs: {stats.link_only_jobs:,} new minimal records")

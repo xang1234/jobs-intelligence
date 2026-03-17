@@ -9,14 +9,15 @@ These tests verify database operations including:
 - Session management
 """
 
+from pathlib import Path
+
 import numpy as np
 import pytest
-from pathlib import Path
 
 from src.mcf.database import MCFDatabase
 from src.mcf.models import Job
 
-from .factories import generate_test_job, generate_test_jobs
+from .factories import generate_test_job
 
 
 class TestDatabaseCreation:
@@ -33,7 +34,7 @@ class TestDatabaseCreation:
     def test_creates_parent_directories(self, temp_dir: Path):
         """Test parent directories are created."""
         db_path = temp_dir / "subdir" / "deep" / "test.db"
-        db = MCFDatabase(str(db_path))
+        MCFDatabase(str(db_path))
 
         assert db_path.parent.exists()
         assert db_path.exists()
@@ -41,9 +42,7 @@ class TestDatabaseCreation:
     def test_schema_is_created(self, empty_db: MCFDatabase):
         """Test all tables are created."""
         with empty_db._connection() as conn:
-            tables = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
+            tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
             table_names = {t[0] for t in tables}
 
         expected_tables = {
@@ -308,9 +307,7 @@ class TestEmbeddings:
         assert len(ids) == 20  # test_db has 20 jobs
         assert embeddings.shape == (20, 384)
 
-    def test_batch_upsert_embeddings(
-        self, empty_db: MCFDatabase, mock_embeddings_batch: tuple
-    ):
+    def test_batch_upsert_embeddings(self, empty_db: MCFDatabase, mock_embeddings_batch: tuple):
         """Test batch embedding insertion."""
         uuids, embeddings = mock_embeddings_batch
 
@@ -326,9 +323,7 @@ class TestEmbeddings:
         ids, retrieved = empty_db.get_all_embeddings("job")
         assert len(ids) == 20
 
-    def test_get_embeddings_for_uuids(
-        self, test_db_with_embeddings: MCFDatabase
-    ):
+    def test_get_embeddings_for_uuids(self, test_db_with_embeddings: MCFDatabase):
         """Test retrieving specific embeddings by UUID."""
         # Get some UUIDs from the database
         jobs = test_db_with_embeddings.search_jobs(limit=5)
@@ -347,14 +342,10 @@ class TestEmbeddings:
         assert stats["total_jobs"] == 20
         assert stats["coverage_pct"] == 100.0
 
-    def test_delete_embeddings_for_model(
-        self, test_db_with_embeddings: MCFDatabase
-    ):
+    def test_delete_embeddings_for_model(self, test_db_with_embeddings: MCFDatabase):
         """Test deleting embeddings by model version."""
         # All test embeddings use default model
-        count = test_db_with_embeddings.delete_embeddings_for_model(
-            "all-MiniLM-L6-v2"
-        )
+        count = test_db_with_embeddings.delete_embeddings_for_model("all-MiniLM-L6-v2")
 
         assert count == 20
 
@@ -397,9 +388,7 @@ class TestFTS5Search:
         assert job_a.uuid in result_uuids
         assert job_b.uuid not in result_uuids
 
-    def test_bm25_search_filtered_scores_all_matching_candidates(
-        self, test_db: MCFDatabase
-    ):
+    def test_bm25_search_filtered_scores_all_matching_candidates(self, test_db: MCFDatabase):
         """Test that filtered BM25 scores every matching candidate, not just top-N."""
         # Insert many jobs so the candidate set is smaller than the full corpus
         target_jobs = []

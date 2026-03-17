@@ -11,18 +11,17 @@ from datetime import date, timedelta
 from typing import Optional
 
 from src.mcf.models import (
+    Address,
+    Category,
+    Company,
+    EmploymentType,
     Job,
+    JobMetadata,
+    PositionLevel,
     Salary,
     SalaryType,
-    Company,
     Skill,
-    Category,
-    Address,
-    EmploymentType,
-    PositionLevel,
-    JobMetadata,
 )
-
 
 # =============================================================================
 # Sample Data Pools
@@ -181,7 +180,7 @@ def generate_company(
     return Company(
         name=name,
         uen=uen,
-        description=f"A leading company in the technology industry.",
+        description="A leading company in the technology industry.",
     )
 
 

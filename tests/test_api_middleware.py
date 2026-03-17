@@ -4,7 +4,6 @@ import logging
 import time
 from unittest.mock import MagicMock, patch
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.requests import Request
@@ -14,7 +13,6 @@ from src.api.middleware import (
     RequestLoggingMiddleware,
     get_client_ip,
 )
-
 
 # =============================================================================
 # Helpers
@@ -235,6 +233,7 @@ class TestMiddlewareIntegration:
 
     def _make_client(self, rate_limit_rpm: int = 100) -> TestClient:
         import sys
+
         from src.api.app import create_app, get_engine
 
         app = create_app(rate_limit_rpm=rate_limit_rpm)
@@ -266,6 +265,7 @@ class TestMiddlewareIntegration:
 
     def test_rate_limit_stored_on_app_state(self):
         from src.api.app import create_app
+
         app = create_app(rate_limit_rpm=42)
         assert app.state.rate_limit_rpm == 42
 
