@@ -3,7 +3,15 @@ import { useMutation } from '@tanstack/react-query'
 import JobCard from '@/components/JobCard'
 import { analyzeCareerDelta, matchProfile } from '@/services/api'
 import { buildCareerDeltaAnalysisRequest, buildProfileMatchRequest } from '@/services/matchLab'
-import type { CareerDeltaScenarioSummary, MatchLabSharedInputs } from '@/types/api'
+import type {
+  CareerDeltaAnalysisResponse,
+  CareerDeltaBaseline,
+  CareerDeltaFilteredScenario,
+  CareerDeltaScenarioChange,
+  CareerDeltaScenarioSignal,
+  CareerDeltaScenarioSummary,
+  MatchLabSharedInputs,
+} from '@/types/api'
 
 type MatchLabTab = 'match' | 'what-if'
 
@@ -13,20 +21,481 @@ function tabButtonClass(isActive: boolean): string {
     : 'bg-[color:var(--surface)] text-slate-600 hover:text-[color:var(--brand)]'
 }
 
-function WhatIfScenarioPreview({ scenario }: { scenario: CareerDeltaScenarioSummary }) {
+function formatPercent(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) {
+    return 'n/a'
+  }
+  return `${value > 0 ? '+' : ''}${value.toFixed(0)}%`
+}
+
+function formatConfidence(score: number): string {
+  return `${(score * 100).toFixed(0)}%`
+}
+
+function formatCurrency(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) {
+    return 'n/a'
+  }
+  return new Intl.NumberFormat('en-SG', {
+    style: 'currency',
+    currency: 'SGD',
+    maximumFractionDigits: 0,
+  }).format(value)
+}
+
+function titleCaseFromKey(value: string | null | undefined): string {
+  if (!value) {
+    return 'Unknown'
+  }
+  return value
+    .replaceAll('_', ' ')
+    .replaceAll('/', ' / ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
+function compactList(items: string[], emptyLabel: string): string {
+  return items.length ? items.join(', ') : emptyLabel
+}
+
+function describeScenarioChange(change: CareerDeltaScenarioChange | null): string[] {
+  if (!change) {
+    return []
+  }
+
+  const lines: string[] = []
+
+  if (change.added_skills.length) {
+    lines.push(`Add ${compactList(change.added_skills, '')}`)
+  }
+  if (change.replaced_skills.length) {
+    lines.push(
+      `Swap ${change.replaced_skills
+        .map((replacement) => `${replacement.from_skill} -> ${replacement.to_skill}`)
+        .join(', ')}`,
+    )
+  }
+  if (change.target_title_family && change.target_title_family !== change.source_title_family) {
+    lines.push(
+      `Shift title focus from ${titleCaseFromKey(change.source_title_family)} to ${titleCaseFromKey(change.target_title_family)}`,
+    )
+  }
+  if (change.target_industry && change.target_industry !== change.source_industry) {
+    lines.push(
+      `Pivot sector from ${titleCaseFromKey(change.source_industry)} to ${titleCaseFromKey(change.target_industry)}`,
+    )
+  }
+
+  return lines
+}
+
+function bestScenarioSignal(signals: CareerDeltaScenarioSignal[]): CareerDeltaScenarioSignal | null {
+  if (!signals.length) {
+    return null
+  }
+  return [...signals].sort((left, right) => right.supporting_jobs - left.supporting_jobs)[0]
+}
+
+function SummaryMetric({
+  label,
+  value,
+  accent = false,
+}: {
+  label: string
+  value: string
+  accent?: boolean
+}) {
   return (
-    <article className="rounded-[24px] border border-[color:var(--border)] bg-white/90 p-5">
-      <div className="flex flex-wrap items-center gap-3">
-        <span className="rounded-full bg-[color:var(--surface)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-          {scenario.scenario_type.replaceAll('_', ' ')}
-        </span>
-        <span className="text-sm font-semibold text-[color:var(--ink)]">
-          {(scenario.confidence.score * 100).toFixed(0)} confidence
-        </span>
+    <div className="rounded-[20px] bg-[color:var(--surface)] px-4 py-3">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</p>
+      <p className={`mt-2 text-lg font-semibold ${accent ? 'text-[color:var(--brand)]' : 'text-[color:var(--ink)]'}`}>
+        {value}
+      </p>
+    </div>
+  )
+}
+
+function BaselineInsightCard({ baseline }: { baseline: CareerDeltaBaseline }) {
+  return (
+    <article className="rounded-[28px] border border-[color:var(--border)] bg-white/90 p-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Market position</p>
+          <h3 className="mt-2 text-3xl font-semibold capitalize text-[color:var(--ink)]">
+            {baseline.position}
+          </h3>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+            {baseline.reachable_jobs.toLocaleString()} reachable roles across{' '}
+            {baseline.total_candidates.toLocaleString()} considered candidates, with median fit{' '}
+            {(baseline.fit_median * 100).toFixed(0)}%.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {baseline.thin_market ? (
+            <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
+              thin market
+            </span>
+          ) : null}
+          {baseline.degraded ? (
+            <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
+              degraded retrieval
+            </span>
+          ) : null}
+        </div>
       </div>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <SummaryMetric label="Reachable jobs" value={baseline.reachable_jobs.toLocaleString()} accent />
+        <SummaryMetric label="Median fit" value={`${(baseline.fit_median * 100).toFixed(0)}%`} />
+        <SummaryMetric label="P90 fit" value={`${(baseline.fit_p90 * 100).toFixed(0)}%`} />
+        <SummaryMetric label="Skill coverage" value={`${(baseline.skill_coverage * 100).toFixed(0)}%`} />
+      </div>
+
+      <div className="mt-5 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+        <div className="rounded-[24px] bg-[color:var(--surface)] px-5 py-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Salary band</p>
+          <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-slate-600">
+            <span className="rounded-full bg-white px-3 py-1 font-medium text-[color:var(--ink)]">
+              Min {formatCurrency(baseline.salary_band.min_annual)}
+            </span>
+            <span className="rounded-full bg-white px-3 py-1 font-medium text-[color:var(--ink)]">
+              Median {formatCurrency(baseline.salary_band.median_annual)}
+            </span>
+            <span className="rounded-full bg-white px-3 py-1 font-medium text-[color:var(--ink)]">
+              Max {formatCurrency(baseline.salary_band.max_annual)}
+            </span>
+          </div>
+        </div>
+
+        <div className="rounded-[24px] bg-[color:var(--surface)] px-5 py-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Baseline notes</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {baseline.notes.length ? (
+              baseline.notes.map((note) => (
+                <span key={note} className="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-700">
+                  {note}
+                </span>
+              ))
+            ) : (
+              <span className="text-sm text-slate-500">No special caveats on the baseline pass.</span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-4 xl:grid-cols-2">
+        <div className="rounded-[24px] bg-[color:var(--surface)] px-5 py-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Extracted skills</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {baseline.extracted_skills.length ? (
+              baseline.extracted_skills.map((skill) => (
+                <span key={skill} className="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-700">
+                  {skill}
+                </span>
+              ))
+            ) : (
+              <span className="text-sm text-slate-500">No extracted baseline skills surfaced.</span>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-[24px] bg-[color:var(--surface)] px-5 py-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Top skill gaps</p>
+          <div className="mt-3 space-y-2">
+            {baseline.top_skill_gaps.length ? (
+              baseline.top_skill_gaps.map((gap) => (
+                <div key={gap.name} className="flex items-center justify-between rounded-2xl bg-white px-4 py-3 text-sm">
+                  <span className="font-medium text-[color:var(--ink)]">{gap.name}</span>
+                  <span className="text-slate-500">
+                    {gap.job_count} jobs · {gap.share_pct.toFixed(0)}%
+                  </span>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-slate-500">No recurring skill gaps surfaced in the baseline pool.</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-4 xl:grid-cols-2">
+        <div className="rounded-[24px] bg-[color:var(--surface)] px-5 py-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Top industries</p>
+          <div className="mt-3 space-y-2">
+            {baseline.top_industries.length ? (
+              baseline.top_industries.map((industry) => (
+                <div key={industry.name} className="flex items-center justify-between rounded-2xl bg-white px-4 py-3 text-sm">
+                  <span className="font-medium text-[color:var(--ink)]">{titleCaseFromKey(industry.name)}</span>
+                  <span className="text-slate-500">
+                    {industry.job_count} jobs · {industry.share_pct.toFixed(0)}%
+                  </span>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-slate-500">Industry concentration is still unclear for this profile.</p>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-[24px] bg-[color:var(--surface)] px-5 py-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Top companies</p>
+          <div className="mt-3 space-y-2">
+            {baseline.top_companies.length ? (
+              baseline.top_companies.map((company) => (
+                <div key={company.name} className="flex items-center justify-between rounded-2xl bg-white px-4 py-3 text-sm">
+                  <span className="font-medium text-[color:var(--ink)]">{company.name}</span>
+                  <span className="text-slate-500">
+                    {company.job_count} jobs · {company.share_pct.toFixed(0)}%
+                  </span>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-slate-500">No dominant employer cluster surfaced in the baseline pool.</p>
+            )}
+          </div>
+        </div>
+      </div>
+    </article>
+  )
+}
+
+function WhatIfScenarioPreview({ index, scenario }: { index: number; scenario: CareerDeltaScenarioSummary }) {
+  const primarySignal = bestScenarioSignal(scenario.signals)
+  const changeLines = describeScenarioChange(scenario.change)
+
+  return (
+    <article className="rounded-[28px] border border-[color:var(--border)] bg-white/90 p-6 shadow-[0_16px_40px_rgba(15,23,42,0.05)]">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="rounded-full bg-[color:var(--brand)]/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--brand)]">
+            #{index + 1}
+          </span>
+          <span className="rounded-full bg-[color:var(--surface)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+            {scenario.scenario_type.replaceAll('_', ' ')}
+          </span>
+          <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">
+            {formatConfidence(scenario.confidence.score)} confidence
+          </span>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {scenario.thin_market ? (
+            <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
+              thin market
+            </span>
+          ) : null}
+          {scenario.degraded ? (
+            <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
+              degraded
+            </span>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-3 text-sm text-slate-600">
+        <span>
+          Market position:{' '}
+          <span className="font-semibold capitalize text-[color:var(--ink)]">{scenario.market_position}</span>
+        </span>
+        {scenario.target_title ? (
+          <span>
+            Target title: <span className="font-semibold text-[color:var(--ink)]">{scenario.target_title}</span>
+          </span>
+        ) : null}
+        {scenario.target_sector ? (
+          <span>
+            Sector: <span className="font-semibold text-[color:var(--ink)]">{titleCaseFromKey(scenario.target_sector)}</span>
+          </span>
+        ) : null}
+      </div>
+
       <h3 className="mt-3 text-lg font-semibold text-[color:var(--ink)]">{scenario.title}</h3>
       <p className="mt-2 text-sm leading-6 text-slate-600">{scenario.summary}</p>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <SummaryMetric label="Salary delta" value={formatPercent(scenario.expected_salary_delta_pct)} accent />
+        <SummaryMetric
+          label="Evidence coverage"
+          value={`${(scenario.confidence.evidence_coverage * 100).toFixed(0)}%`}
+        />
+        <SummaryMetric label="Sample size" value={scenario.confidence.market_sample_size.toLocaleString()} />
+        <SummaryMetric
+          label="Pivot cost"
+          value={scenario.score_breakdown ? scenario.score_breakdown.pivot_cost.toFixed(2) : 'n/a'}
+        />
+      </div>
+
+      {scenario.score_breakdown ? (
+        <div className="mt-5 rounded-[24px] bg-[color:var(--surface)] px-5 py-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Score breakdown</p>
+          <div className="mt-3 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+            <SummaryMetric label="Opportunity" value={scenario.score_breakdown.opportunity.toFixed(2)} />
+            <SummaryMetric label="Quality" value={scenario.score_breakdown.quality.toFixed(2)} />
+            <SummaryMetric label="Salary" value={scenario.score_breakdown.salary.toFixed(2)} />
+            <SummaryMetric label="Momentum" value={scenario.score_breakdown.momentum.toFixed(2)} />
+            <SummaryMetric label="Diversity" value={scenario.score_breakdown.diversity.toFixed(2)} />
+            <SummaryMetric label="Final score" value={scenario.score_breakdown.final_score.toFixed(2)} accent />
+          </div>
+        </div>
+      ) : null}
+
+      <div className="mt-5 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+        <div className="rounded-[24px] bg-[color:var(--surface)] px-5 py-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Recommended move</p>
+          <div className="mt-3 space-y-2">
+            {changeLines.length ? (
+              changeLines.map((line) => (
+                <p key={line} className="rounded-2xl bg-white px-4 py-3 text-sm text-slate-700">
+                  {line}
+                </p>
+              ))
+            ) : (
+              <p className="rounded-2xl bg-white px-4 py-3 text-sm text-slate-500">
+                The engine did not expose a structured change list for this scenario.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-[24px] bg-[color:var(--surface)] px-5 py-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Top signal</p>
+          {primarySignal ? (
+            <div className="mt-3 space-y-2">
+              <p className="rounded-2xl bg-white px-4 py-3 text-sm text-slate-700">
+                {primarySignal.supporting_jobs} supporting jobs · {primarySignal.supporting_share_pct.toFixed(0)}%
+                share
+              </p>
+              <p className="rounded-2xl bg-white px-4 py-3 text-sm text-slate-700">
+                Demand momentum {formatPercent(primarySignal.market_momentum)} · Median salary{' '}
+                {formatCurrency(primarySignal.market_salary_annual_median)}
+              </p>
+              {primarySignal.skill ? (
+                <p className="rounded-2xl bg-white px-4 py-3 text-sm text-slate-700">
+                  Signal skill: <span className="font-medium text-[color:var(--ink)]">{primarySignal.skill}</span>
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <p className="mt-3 rounded-2xl bg-white px-4 py-3 text-sm text-slate-500">
+              No primary signal was attached to this recommendation.
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-5">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Confidence notes</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {scenario.confidence.reasons.length ? (
+            scenario.confidence.reasons.map((reason) => (
+              <span key={reason} className="rounded-full bg-[color:var(--surface)] px-3 py-1 text-xs font-medium text-slate-700">
+                {reason}
+              </span>
+            ))
+          ) : (
+            <span className="text-sm text-slate-500">No extra confidence notes supplied.</span>
+          )}
+        </div>
+      </div>
     </article>
+  )
+}
+
+function FilteredScenariosPanel({ filtered }: { filtered: CareerDeltaFilteredScenario[] }) {
+  return (
+    <section className="rounded-[28px] border border-dashed border-[color:var(--border)] bg-white/75 p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Filtered scenarios</p>
+          <h3 className="mt-2 text-xl font-semibold text-[color:var(--ink)]">Rejected moves the engine considered</h3>
+        </div>
+        <span className="rounded-full bg-[color:var(--surface)] px-3 py-1 text-xs font-semibold text-slate-600">
+          {filtered.length} filtered
+        </span>
+      </div>
+
+      <div className="mt-4 space-y-3">
+        {filtered.map((scenario) => (
+          <article key={scenario.scenario_id} className="rounded-[22px] border border-[color:var(--border)] bg-white px-5 py-4">
+            <div className="flex flex-wrap items-center gap-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              <span>{scenario.scenario_type.replaceAll('_', ' ')}</span>
+              <span>{scenario.reason_code.replaceAll('_', ' ')}</span>
+              <span>{formatConfidence(scenario.confidence.score)} confidence</span>
+            </div>
+            <p className="mt-3 text-sm leading-6 text-slate-700">{scenario.explanation}</p>
+          </article>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function WhatIfSummaryPanel({ response }: { response: CareerDeltaAnalysisResponse | undefined }) {
+  const baseline = response?.baseline
+
+  if (!response) {
+    return (
+      <div className="rounded-[28px] border border-dashed border-[color:var(--border)] bg-white/70 p-10 text-center text-sm text-slate-500">
+        What If results will appear here once you run counterfactual analysis from the shared profile inputs.
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-[28px] border border-[color:var(--border)] bg-white/90 p-6">
+        <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
+          <span>
+            Scenario count:{' '}
+            <span className="font-semibold text-[color:var(--ink)]">{response.scenarios.length}</span>
+          </span>
+          <span>
+            Filtered:{' '}
+            <span className="font-semibold text-[color:var(--ink)]">{response.filtered_scenarios.length}</span>
+          </span>
+          <span>
+            Analysis time:{' '}
+            <span className="font-semibold text-[color:var(--ink)]">
+              {response.analysis_time_ms?.toFixed(0) ?? '0'}ms
+            </span>
+          </span>
+          {response.thin_market ? (
+            <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
+              thin market
+            </span>
+          ) : null}
+          {response.degraded ? (
+            <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
+              degraded retrieval
+            </span>
+          ) : null}
+        </div>
+      </div>
+
+      {baseline ? <BaselineInsightCard baseline={baseline} /> : null}
+
+      <section className="space-y-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Ranked scenarios</p>
+          <h3 className="mt-2 text-2xl font-semibold text-[color:var(--ink)]">Recommended moves with market evidence</h3>
+        </div>
+
+        {response.scenarios.length ? (
+          response.scenarios.map((scenario, index) => (
+            <WhatIfScenarioPreview key={scenario.scenario_id} index={index} scenario={scenario} />
+          ))
+        ) : (
+          <div className="rounded-[28px] border border-dashed border-[color:var(--border)] bg-white/70 p-10 text-center text-sm text-slate-500">
+            No recommendation cleared the quality bar for this profile yet. The baseline and filtered scenarios
+            below explain what the engine saw.
+          </div>
+        )}
+      </section>
+
+      {response.filtered_scenarios.length ? (
+        <FilteredScenariosPanel filtered={response.filtered_scenarios} />
+      ) : null}
+    </div>
   )
 }
 
@@ -197,11 +666,11 @@ export default function MatchLabPage() {
                     </span>
                   </span>
                   <span>{matchMutation.data ? `${matchMutation.data.search_time_ms.toFixed(0)}ms` : null}</span>
-                  {matchMutation.data?.degraded && (
+                  {matchMutation.data?.degraded ? (
                     <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
                       degraded retrieval
                     </span>
-                  )}
+                  ) : null}
                 </div>
 
                 <div className="mt-4">
@@ -228,9 +697,7 @@ export default function MatchLabPage() {
 
               <div className="space-y-4">
                 {matchMutation.data?.results.length ? (
-                  matchMutation.data.results.map((job) => (
-                    <JobCard key={job.uuid} job={job} />
-                  ))
+                  matchMutation.data.results.map((job) => <JobCard key={job.uuid} job={job} />)
                 ) : (
                   <div className="rounded-[28px] border border-dashed border-[color:var(--border)] bg-white/70 p-10 text-center text-sm text-slate-500">
                     Match results will appear here with score decomposition and missing-skill signals.
@@ -240,65 +707,13 @@ export default function MatchLabPage() {
             </>
           ) : (
             <>
-              <div className="rounded-[28px] border border-[color:var(--border)] bg-white/90 p-6">
-                <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
-                  <span>
-                    Scenario count:{' '}
-                    <span className="font-semibold text-[color:var(--ink)]">
-                      {whatIfMutation.data?.scenarios.length ?? 0}
-                    </span>
-                  </span>
-                  <span>
-                    Analysis time:{' '}
-                    <span className="font-semibold text-[color:var(--ink)]">
-                      {whatIfMutation.data?.analysis_time_ms?.toFixed(0) ?? '0'}ms
-                    </span>
-                  </span>
-                  {whatIfMutation.data?.thin_market && (
-                    <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
-                      thin market
-                    </span>
-                  )}
-                  {whatIfMutation.data?.degraded && (
-                    <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
-                      degraded retrieval
-                    </span>
-                  )}
-                </div>
-
-                <div className="mt-4 grid gap-4 md:grid-cols-2">
-                  <div className="rounded-[24px] bg-[color:var(--surface)] px-5 py-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Market position</p>
-                    <p className="mt-2 text-2xl font-semibold capitalize text-[color:var(--ink)]">
-                      {whatIfMutation.data?.baseline?.position ?? 'pending'}
-                    </p>
-                  </div>
-                  <div className="rounded-[24px] bg-[color:var(--surface)] px-5 py-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Reachable jobs</p>
-                    <p className="mt-2 text-2xl font-semibold text-[color:var(--ink)]">
-                      {whatIfMutation.data?.baseline?.reachable_jobs ?? 0}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
               {whatIfMutation.error ? (
                 <div className="rounded-[24px] border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-900">
                   {whatIfMutation.error instanceof Error ? whatIfMutation.error.message : 'What If request failed.'}
                 </div>
               ) : null}
 
-              <div className="space-y-4">
-                {whatIfMutation.data?.scenarios.length ? (
-                  whatIfMutation.data.scenarios.map((scenario) => (
-                    <WhatIfScenarioPreview key={scenario.scenario_id} scenario={scenario} />
-                  ))
-                ) : (
-                  <div className="rounded-[28px] border border-dashed border-[color:var(--border)] bg-white/70 p-10 text-center text-sm text-slate-500">
-                    What If results will appear here once you run counterfactual analysis from the shared profile inputs.
-                  </div>
-                )}
-              </div>
+              <WhatIfSummaryPanel response={whatIfMutation.data} />
             </>
           )}
         </article>
