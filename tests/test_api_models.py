@@ -287,6 +287,10 @@ class TestCareerDeltaAnalysisRequest:
             CareerDeltaScenarioType.SKILL_ADDITION,
             CareerDeltaScenarioType.TITLE_PIVOT,
         ]
+        assert req.selected_delta_types() == (
+            CareerDeltaScenarioType.SKILL_ADDITION,
+            CareerDeltaScenarioType.TITLE_PIVOT,
+        )
 
     def test_profile_text_rejects_whitespace_only_content(self):
         with pytest.raises(ValidationError, match="at least 20 non-whitespace characters"):
@@ -622,6 +626,57 @@ class TestCareerDeltaResponseModels:
         assert response.scenarios[0].signals[0].signal_type == "skill"
         assert response.filtered_scenarios[0].reason_code == "overlapping_scenario"
         assert response.filtered_scenarios[0].market_position.value == "stretch"
+
+    def test_analysis_response_can_filter_to_requested_delta_types(self):
+        internal = CareerDeltaResponse(
+            request=CareerDeltaAnalysisRequest(
+                profile_text="Experienced engineer with Python, SQL, APIs, and cloud operations."
+            ).to_internal(),
+            summaries=(
+                ScenarioSummary(
+                    scenario_id="skill_addition:abc",
+                    scenario_type=ScenarioType.SKILL_ADDITION,
+                    title="Add Kubernetes",
+                    summary="Add Kubernetes.",
+                    market_position=MarketPosition.COMPETITIVE,
+                    confidence=ScenarioConfidence(score=0.8, evidence_coverage=0.6, market_sample_size=20),
+                ),
+                ScenarioSummary(
+                    scenario_id="title_pivot:abc",
+                    scenario_type=ScenarioType.TITLE_PIVOT,
+                    title="Pivot toward Platform Engineer",
+                    summary="Shift toward platform roles.",
+                    market_position=MarketPosition.STRETCH,
+                    confidence=ScenarioConfidence(score=0.7, evidence_coverage=0.5, market_sample_size=18),
+                ),
+            ),
+            filtered_scenarios=(
+                FilteredScenario(
+                    scenario_id="skill_substitution:abc",
+                    scenario_type=ScenarioType.SKILL_SUBSTITUTION,
+                    reason_code="low_signal",
+                    explanation="Weak support.",
+                    confidence=ScenarioConfidence(score=0.3, evidence_coverage=0.2, market_sample_size=3),
+                ),
+                FilteredScenario(
+                    scenario_id="title_pivot:def",
+                    scenario_type=ScenarioType.TITLE_PIVOT,
+                    reason_code="overlapping_scenario",
+                    explanation="Overlapped with a better pivot.",
+                    confidence=ScenarioConfidence(score=0.6, evidence_coverage=0.4, market_sample_size=12),
+                ),
+            ),
+        )
+
+        response = CareerDeltaAnalysisResponse.from_internal(
+            internal,
+            allowed_delta_types=(CareerDeltaScenarioType.TITLE_PIVOT,),
+        )
+
+        assert [item.scenario_type for item in response.scenarios] == [CareerDeltaScenarioType.TITLE_PIVOT]
+        assert [item.scenario_type for item in response.filtered_scenarios] == [
+            CareerDeltaScenarioType.TITLE_PIVOT
+        ]
 
     def test_scenario_detail_from_internal_maps_nested_summary_and_pivot_signal(self):
         summary = ScenarioSummary(

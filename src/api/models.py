@@ -362,6 +362,10 @@ class CareerDeltaAnalysisRequest(BaseModel):
             include_filtered=self.include_filtered,
         )
 
+    def selected_delta_types(self) -> tuple[CareerDeltaScenarioType, ...]:
+        """Normalized public delta-type filter for API-layer response shaping."""
+        return tuple(self.delta_types)
+
     model_config = {
         "json_schema_extra": {
             "examples": [
@@ -1030,14 +1034,24 @@ class CareerDeltaAnalysisResponse(BaseModel):
         cls,
         internal: InternalCareerDeltaResponse,
         *,
+        allowed_delta_types: Optional[list[CareerDeltaScenarioType] | tuple[CareerDeltaScenarioType, ...]] = None,
         analysis_time_ms: Optional[float] = None,
     ) -> "CareerDeltaAnalysisResponse":
+        allowed = {item.value for item in allowed_delta_types or ()}
+        summaries = [
+            item
+            for item in internal.summaries
+            if not allowed or item.scenario_type.value in allowed
+        ]
+        filtered = [
+            item
+            for item in internal.filtered_scenarios
+            if not allowed or item.scenario_type.value in allowed
+        ]
         return cls(
             baseline=CareerDeltaBaseline.from_internal(internal.baseline) if internal.baseline else None,
-            scenarios=[CareerDeltaScenarioSummary.from_internal(item) for item in internal.summaries],
-            filtered_scenarios=[
-                CareerDeltaFilteredScenario.from_internal(item) for item in internal.filtered_scenarios
-            ],
+            scenarios=[CareerDeltaScenarioSummary.from_internal(item) for item in summaries],
+            filtered_scenarios=[CareerDeltaFilteredScenario.from_internal(item) for item in filtered],
             degraded=internal.degraded,
             thin_market=internal.thin_market,
             analysis_time_ms=analysis_time_ms,
