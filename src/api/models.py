@@ -13,10 +13,53 @@ translates between the HTTP layer and the engine layer.
 """
 
 from datetime import date
+from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from ..mcf.career_delta import (
+    BaselineMarketPosition as InternalBaselineMarketPosition,
+)
+from ..mcf.career_delta import (
+    CareerDeltaRequest as InternalCareerDeltaRequest,
+)
+from ..mcf.career_delta import (
+    CareerDeltaResponse as InternalCareerDeltaResponse,
+)
+from ..mcf.career_delta import (
+    FilteredScenario as InternalFilteredScenario,
+)
+from ..mcf.career_delta import (
+    MarketInsight as InternalMarketInsight,
+)
+from ..mcf.career_delta import (
+    PivotScenarioSignal as InternalPivotScenarioSignal,
+)
+from ..mcf.career_delta import (
+    SalaryBand as InternalSalaryBand,
+)
+from ..mcf.career_delta import (
+    ScenarioChange as InternalScenarioChange,
+)
+from ..mcf.career_delta import (
+    ScenarioConfidence as InternalScenarioConfidence,
+)
+from ..mcf.career_delta import (
+    ScenarioDetail as InternalScenarioDetail,
+)
+from ..mcf.career_delta import (
+    ScenarioScoreBreakdown as InternalScenarioScoreBreakdown,
+)
+from ..mcf.career_delta import (
+    ScenarioSummary as InternalScenarioSummary,
+)
+from ..mcf.career_delta import (
+    SkillReplacement as InternalSkillReplacement,
+)
+from ..mcf.career_delta import (
+    SkillScenarioSignal as InternalSkillScenarioSignal,
+)
 from ..mcf.embeddings.models import (
     CompanySimilarityRequest as InternalCompanySimilarityRequest,
 )
@@ -33,6 +76,53 @@ from ..mcf.embeddings.models import (
 # =============================================================================
 # Request Models
 # =============================================================================
+
+
+class CareerDeltaScenarioType(str, Enum):
+    """Public scenario families supported by the career-delta API."""
+
+    SAME_ROLE = "same_role"
+    ADJACENT_ROLE = "adjacent_role"
+    INDUSTRY_PIVOT = "industry_pivot"
+    TITLE_PIVOT = "title_pivot"
+    SAME_ROLE_INDUSTRY_PIVOT = "same_role_industry_pivot"
+    ADJACENT_ROLE_INDUSTRY_PIVOT = "adjacent_role_industry_pivot"
+    SKILL_ADDITION = "skill_addition"
+    SKILL_SUBSTITUTION = "skill_substitution"
+
+
+class CareerDeltaMarketPosition(str, Enum):
+    """Stable market-position vocabulary exposed over HTTP."""
+
+    LEADING = "leading"
+    COMPETITIVE = "competitive"
+    STRETCH = "stretch"
+    THIN = "thin"
+    UNCLEAR = "unclear"
+
+
+def _clean_scalar(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    cleaned = " ".join(value.split())
+    return cleaned or None
+
+
+def _clean_string_list(values: list[str], *, label: str, max_item_length: int) -> list[str]:
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = " ".join(value.split())
+        if not normalized:
+            raise ValueError(f"{label} cannot contain blank values")
+        if len(normalized) > max_item_length:
+            raise ValueError(f"{label} entries must be <= {max_item_length} characters")
+        key = normalized.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(normalized)
+    return cleaned
 
 
 class SearchRequest(BaseModel):
@@ -193,6 +283,103 @@ class ProfileMatchRequest(BaseModel):
     employment_type: Optional[str] = None
     region: Optional[str] = None
     limit: int = Field(20, ge=1, le=100)
+
+
+class CareerDeltaAnalysisRequest(BaseModel):
+    """Request payload for career-delta analysis."""
+
+    profile_text: str = Field(..., min_length=20, max_length=20000)
+    current_title: Optional[str] = Field(None, max_length=160)
+    target_titles: list[str] = Field(default_factory=list, max_length=8)
+    current_categories: list[str] = Field(default_factory=list, max_length=12)
+    current_skills: list[str] = Field(default_factory=list, max_length=50)
+    current_company: Optional[str] = Field(None, max_length=200)
+    location: Optional[str] = Field(None, max_length=120)
+    target_salary_min: Optional[int] = Field(None, gt=0)
+    max_scenarios: int = Field(12, ge=1, le=12)
+    include_filtered: bool = Field(
+        True,
+        description="Include withheld scenarios and explanations in the response.",
+    )
+    delta_types: list[CareerDeltaScenarioType] = Field(
+        default_factory=list,
+        max_length=8,
+        description="Optional scenario families to keep when rendering results.",
+    )
+
+    @field_validator("profile_text")
+    @classmethod
+    def profile_text_must_have_content(cls, value: str) -> str:
+        cleaned = value.strip()
+        if len(cleaned) < 20:
+            raise ValueError("profile_text must contain at least 20 non-whitespace characters")
+        return cleaned
+
+    @field_validator("current_title", "current_company", "location")
+    @classmethod
+    def normalize_optional_scalars(cls, value: Optional[str]) -> Optional[str]:
+        return _clean_scalar(value)
+
+    @field_validator("target_titles")
+    @classmethod
+    def normalize_target_titles(cls, value: list[str]) -> list[str]:
+        return _clean_string_list(value, label="target_titles", max_item_length=160)
+
+    @field_validator("current_categories")
+    @classmethod
+    def normalize_current_categories(cls, value: list[str]) -> list[str]:
+        return _clean_string_list(value, label="current_categories", max_item_length=120)
+
+    @field_validator("current_skills")
+    @classmethod
+    def normalize_current_skills(cls, value: list[str]) -> list[str]:
+        return _clean_string_list(value, label="current_skills", max_item_length=80)
+
+    @field_validator("delta_types")
+    @classmethod
+    def dedupe_delta_types(cls, value: list[CareerDeltaScenarioType]) -> list[CareerDeltaScenarioType]:
+        deduped: list[CareerDeltaScenarioType] = []
+        seen: set[str] = set()
+        for item in value:
+            if item.value in seen:
+                continue
+            seen.add(item.value)
+            deduped.append(item)
+        return deduped
+
+    def to_internal(self) -> InternalCareerDeltaRequest:
+        """Convert to the internal career-delta engine request."""
+        return InternalCareerDeltaRequest(
+            profile_text=self.profile_text,
+            current_title=self.current_title,
+            target_titles=tuple(self.target_titles),
+            current_categories=tuple(self.current_categories),
+            current_skills=tuple(self.current_skills),
+            current_company=self.current_company,
+            location=self.location,
+            target_salary_min=self.target_salary_min,
+            limit=self.max_scenarios,
+            include_filtered=self.include_filtered,
+        )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "profile_text": "Senior data analyst with Python, SQL, and dashboarding experience.",
+                    "current_title": "Senior Data Analyst",
+                    "target_titles": ["Analytics Engineer", "Data Scientist"],
+                    "current_skills": ["Python", "SQL", "Tableau"],
+                    "current_company": "Example Corp",
+                    "location": "Singapore",
+                    "target_salary_min": 90000,
+                    "max_scenarios": 6,
+                    "include_filtered": True,
+                    "delta_types": ["skill_addition", "title_pivot"],
+                }
+            ]
+        }
+    }
 
 
 # =============================================================================
@@ -512,6 +699,349 @@ class ProfileMatchResponse(BaseModel):
     total_candidates: int
     search_time_ms: float
     degraded: bool
+
+
+class CareerDeltaConfidence(BaseModel):
+    """Explainable confidence metadata for API consumers."""
+
+    score: float = Field(ge=0.0, le=1.0)
+    evidence_coverage: float = Field(0.0, ge=0.0, le=1.0)
+    market_sample_size: int = Field(0, ge=0)
+    reasons: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_internal(cls, internal: InternalScenarioConfidence) -> "CareerDeltaConfidence":
+        return cls(
+            score=internal.score,
+            evidence_coverage=internal.evidence_coverage,
+            market_sample_size=internal.market_sample_size,
+            reasons=list(internal.reasons),
+        )
+
+
+class CareerDeltaScoreBreakdown(BaseModel):
+    """Composite ranking components exposed for debugging and UI disclosure."""
+
+    opportunity: float = 0.0
+    quality: float = 0.0
+    salary: float = 0.0
+    momentum: float = 0.0
+    diversity: float = 0.0
+    raw_score: float = 0.0
+    pivot_cost: float = 0.0
+    final_score: float = 0.0
+
+    @classmethod
+    def from_internal(cls, internal: Optional[InternalScenarioScoreBreakdown]) -> Optional["CareerDeltaScoreBreakdown"]:
+        if internal is None:
+            return None
+        return cls(
+            opportunity=internal.opportunity,
+            quality=internal.quality,
+            salary=internal.salary,
+            momentum=internal.momentum,
+            diversity=internal.diversity,
+            raw_score=internal.raw_score,
+            pivot_cost=internal.pivot_cost,
+            final_score=internal.final_score,
+        )
+
+
+class CareerDeltaMarketInsight(BaseModel):
+    """Count/share metric used in baseline summaries."""
+
+    name: str
+    job_count: int = Field(ge=0)
+    share_pct: float = Field(ge=0.0)
+
+    @classmethod
+    def from_internal(cls, internal: InternalMarketInsight) -> "CareerDeltaMarketInsight":
+        return cls(
+            name=internal.name,
+            job_count=internal.job_count,
+            share_pct=internal.share_pct,
+        )
+
+
+class CareerDeltaSalaryBand(BaseModel):
+    """Salary range summary for a baseline or scenario market bucket."""
+
+    min_annual: Optional[int] = Field(None, ge=0)
+    median_annual: Optional[int] = Field(None, ge=0)
+    max_annual: Optional[int] = Field(None, ge=0)
+
+    @classmethod
+    def from_internal(cls, internal: InternalSalaryBand) -> "CareerDeltaSalaryBand":
+        return cls(
+            min_annual=internal.min_annual,
+            median_annual=internal.median_annual,
+            max_annual=internal.max_annual,
+        )
+
+
+class CareerDeltaSkillReplacement(BaseModel):
+    """One skill swap proposed by a scenario."""
+
+    from_skill: str
+    to_skill: str
+
+    @classmethod
+    def from_internal(cls, internal: InternalSkillReplacement) -> "CareerDeltaSkillReplacement":
+        return cls(from_skill=internal.from_skill, to_skill=internal.to_skill)
+
+
+class CareerDeltaScenarioChange(BaseModel):
+    """Structured change payload for a scenario."""
+
+    added_skills: list[str] = Field(default_factory=list)
+    removed_skills: list[str] = Field(default_factory=list)
+    replaced_skills: list[CareerDeltaSkillReplacement] = Field(default_factory=list)
+    source_title_family: Optional[str] = None
+    target_title_family: Optional[str] = None
+    source_industry: Optional[str] = None
+    target_industry: Optional[str] = None
+
+    @classmethod
+    def from_internal(cls, internal: Optional[InternalScenarioChange]) -> Optional["CareerDeltaScenarioChange"]:
+        if internal is None:
+            return None
+        return cls(
+            added_skills=list(internal.added_skills),
+            removed_skills=list(internal.removed_skills),
+            replaced_skills=[CareerDeltaSkillReplacement.from_internal(item) for item in internal.replaced_skills],
+            source_title_family=internal.source_title_family,
+            target_title_family=internal.target_title_family,
+            source_industry=internal.source_industry,
+            target_industry=internal.target_industry,
+        )
+
+
+class CareerDeltaScenarioSignal(BaseModel):
+    """Flattened market evidence for either skill or pivot scenarios."""
+
+    signal_type: str = Field(description="'skill' or 'pivot'")
+    skill: Optional[str] = None
+    supporting_jobs: int = Field(ge=0)
+    supporting_share_pct: float = Field(ge=0.0)
+    market_job_count: int = Field(ge=0)
+    market_salary_annual_median: Optional[int] = Field(None, ge=0)
+    market_momentum: Optional[float] = None
+    salary_lift_pct: Optional[float] = None
+    similarity: Optional[float] = None
+    same_cluster: Optional[bool] = None
+    target_title_family: Optional[str] = None
+    target_industry: Optional[str] = None
+    title_distance: Optional[str] = None
+    industry_distance: Optional[int] = None
+    fit_median: Optional[float] = None
+
+    @classmethod
+    def from_internal(
+        cls,
+        internal: InternalSkillScenarioSignal | InternalPivotScenarioSignal,
+    ) -> "CareerDeltaScenarioSignal":
+        if isinstance(internal, InternalSkillScenarioSignal):
+            return cls(
+                signal_type="skill",
+                skill=internal.skill,
+                supporting_jobs=internal.supporting_jobs,
+                supporting_share_pct=internal.supporting_share_pct,
+                market_job_count=internal.market_job_count,
+                market_salary_annual_median=internal.market_salary_annual_median,
+                market_momentum=internal.market_momentum,
+                salary_lift_pct=internal.salary_lift_pct,
+                similarity=internal.similarity,
+                same_cluster=internal.same_cluster,
+            )
+        return cls(
+            signal_type="pivot",
+            supporting_jobs=internal.supporting_jobs,
+            supporting_share_pct=internal.supporting_share_pct,
+            market_job_count=internal.market_job_count,
+            market_salary_annual_median=internal.market_salary_annual_median,
+            market_momentum=internal.market_momentum,
+            salary_lift_pct=internal.salary_lift_pct,
+            target_title_family=internal.target_title_family,
+            target_industry=internal.target_industry,
+            title_distance=internal.title_distance,
+            industry_distance=internal.industry_distance,
+            fit_median=internal.fit_median,
+        )
+
+
+class CareerDeltaBaseline(BaseModel):
+    """Baseline market-position payload."""
+
+    position: CareerDeltaMarketPosition
+    reachable_jobs: int = Field(ge=0)
+    total_candidates: int = Field(ge=0)
+    fit_median: float = Field(ge=0.0, le=1.0)
+    fit_p90: float = Field(ge=0.0, le=1.0)
+    salary_band: CareerDeltaSalaryBand
+    top_industries: list[CareerDeltaMarketInsight] = Field(default_factory=list)
+    top_companies: list[CareerDeltaMarketInsight] = Field(default_factory=list)
+    extracted_skills: list[str] = Field(default_factory=list)
+    skill_coverage: float = Field(0.0, ge=0.0, le=1.0)
+    top_skill_gaps: list[CareerDeltaMarketInsight] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+    thin_market: bool = False
+    degraded: bool = False
+
+    @classmethod
+    def from_internal(cls, internal: InternalBaselineMarketPosition) -> "CareerDeltaBaseline":
+        return cls(
+            position=CareerDeltaMarketPosition(internal.position.value),
+            reachable_jobs=internal.reachable_jobs,
+            total_candidates=internal.total_candidates,
+            fit_median=internal.fit_median,
+            fit_p90=internal.fit_p90,
+            salary_band=CareerDeltaSalaryBand.from_internal(internal.salary_band),
+            top_industries=[CareerDeltaMarketInsight.from_internal(item) for item in internal.top_industries],
+            top_companies=[CareerDeltaMarketInsight.from_internal(item) for item in internal.top_companies],
+            extracted_skills=list(internal.extracted_skills),
+            skill_coverage=internal.skill_coverage,
+            top_skill_gaps=[CareerDeltaMarketInsight.from_internal(item) for item in internal.top_skill_gaps],
+            notes=list(internal.notes),
+            thin_market=internal.thin_market,
+            degraded=internal.degraded,
+        )
+
+
+class CareerDeltaScenarioSummary(BaseModel):
+    """Compact scenario row for list views."""
+
+    scenario_id: str
+    scenario_type: CareerDeltaScenarioType
+    title: str
+    summary: str
+    market_position: CareerDeltaMarketPosition
+    confidence: CareerDeltaConfidence
+    score_breakdown: Optional[CareerDeltaScoreBreakdown] = None
+    change: Optional[CareerDeltaScenarioChange] = None
+    signals: list[CareerDeltaScenarioSignal] = Field(default_factory=list)
+    target_title: Optional[str] = None
+    target_sector: Optional[str] = None
+    thin_market: bool = False
+    degraded: bool = False
+    expected_salary_delta_pct: Optional[float] = None
+
+    @classmethod
+    def from_internal(cls, internal: InternalScenarioSummary) -> "CareerDeltaScenarioSummary":
+        return cls(
+            scenario_id=internal.scenario_id,
+            scenario_type=CareerDeltaScenarioType(internal.scenario_type.value),
+            title=internal.title,
+            summary=internal.summary,
+            market_position=CareerDeltaMarketPosition(internal.market_position.value),
+            confidence=CareerDeltaConfidence.from_internal(internal.confidence),
+            score_breakdown=CareerDeltaScoreBreakdown.from_internal(internal.score_breakdown),
+            change=CareerDeltaScenarioChange.from_internal(internal.change),
+            signals=[CareerDeltaScenarioSignal.from_internal(signal) for signal in internal.signals],
+            target_title=internal.target_title,
+            target_sector=internal.target_sector,
+            thin_market=internal.thin_market,
+            degraded=internal.degraded,
+            expected_salary_delta_pct=internal.expected_salary_delta_pct,
+        )
+
+
+class CareerDeltaScenarioDetail(BaseModel):
+    """Expanded scenario payload for detail views."""
+
+    scenario_id: str
+    scenario_type: CareerDeltaScenarioType
+    title: str
+    narrative: str
+    market_position: CareerDeltaMarketPosition
+    confidence: CareerDeltaConfidence
+    score_breakdown: Optional[CareerDeltaScoreBreakdown] = None
+    summary: Optional[CareerDeltaScenarioSummary] = None
+    change: Optional[CareerDeltaScenarioChange] = None
+    signals: list[CareerDeltaScenarioSignal] = Field(default_factory=list)
+    target_title: Optional[str] = None
+    target_sector: Optional[str] = None
+    evidence: list[str] = Field(default_factory=list)
+    missing_skills: list[str] = Field(default_factory=list)
+    search_queries: list[str] = Field(default_factory=list)
+    thin_market: bool = False
+    degraded: bool = False
+
+    @classmethod
+    def from_internal(cls, internal: InternalScenarioDetail) -> "CareerDeltaScenarioDetail":
+        return cls(
+            scenario_id=internal.scenario_id,
+            scenario_type=CareerDeltaScenarioType(internal.scenario_type.value),
+            title=internal.title,
+            narrative=internal.narrative,
+            market_position=CareerDeltaMarketPosition(internal.market_position.value),
+            confidence=CareerDeltaConfidence.from_internal(internal.confidence),
+            score_breakdown=CareerDeltaScoreBreakdown.from_internal(internal.score_breakdown),
+            summary=CareerDeltaScenarioSummary.from_internal(internal.summary) if internal.summary else None,
+            change=CareerDeltaScenarioChange.from_internal(internal.change),
+            signals=[CareerDeltaScenarioSignal.from_internal(signal) for signal in internal.signals],
+            target_title=internal.target_title,
+            target_sector=internal.target_sector,
+            evidence=list(internal.evidence),
+            missing_skills=list(internal.missing_skills),
+            search_queries=list(internal.search_queries),
+            thin_market=internal.thin_market,
+            degraded=internal.degraded,
+        )
+
+
+class CareerDeltaFilteredScenario(BaseModel):
+    """Reason a plausible scenario was withheld from ranking."""
+
+    scenario_id: str
+    scenario_type: CareerDeltaScenarioType
+    reason_code: str
+    explanation: str
+    confidence: CareerDeltaConfidence
+    market_position: CareerDeltaMarketPosition = CareerDeltaMarketPosition.UNCLEAR
+
+    @classmethod
+    def from_internal(cls, internal: InternalFilteredScenario) -> "CareerDeltaFilteredScenario":
+        return cls(
+            scenario_id=internal.scenario_id,
+            scenario_type=CareerDeltaScenarioType(internal.scenario_type.value),
+            reason_code=internal.reason_code,
+            explanation=internal.explanation,
+            confidence=CareerDeltaConfidence.from_internal(internal.confidence),
+            market_position=CareerDeltaMarketPosition(internal.market_position.value),
+        )
+
+
+class CareerDeltaAnalysisResponse(BaseModel):
+    """Top-level response payload for career-delta analysis."""
+
+    baseline: Optional[CareerDeltaBaseline] = None
+    scenarios: list[CareerDeltaScenarioSummary] = Field(default_factory=list)
+    filtered_scenarios: list[CareerDeltaFilteredScenario] = Field(default_factory=list)
+    degraded: bool = False
+    thin_market: bool = False
+    analysis_time_ms: Optional[float] = Field(
+        None,
+        ge=0.0,
+        description="End-to-end backend execution time in milliseconds when available.",
+    )
+
+    @classmethod
+    def from_internal(
+        cls,
+        internal: InternalCareerDeltaResponse,
+        *,
+        analysis_time_ms: Optional[float] = None,
+    ) -> "CareerDeltaAnalysisResponse":
+        return cls(
+            baseline=CareerDeltaBaseline.from_internal(internal.baseline) if internal.baseline else None,
+            scenarios=[CareerDeltaScenarioSummary.from_internal(item) for item in internal.summaries],
+            filtered_scenarios=[
+                CareerDeltaFilteredScenario.from_internal(item) for item in internal.filtered_scenarios
+            ],
+            degraded=internal.degraded,
+            thin_market=internal.thin_market,
+            analysis_time_ms=analysis_time_ms,
+        )
 
 
 JobResult.model_rebuild()

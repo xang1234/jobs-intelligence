@@ -6,6 +6,12 @@ import pytest
 from pydantic import ValidationError
 
 from src.api.models import (
+    CareerDeltaAnalysisRequest,
+    CareerDeltaAnalysisResponse,
+    CareerDeltaConfidence,
+    CareerDeltaFilteredScenario,
+    CareerDeltaScenarioDetail,
+    CareerDeltaScenarioType,
     CompanySimilarity,
     CompanySimilarityRequest,
     ErrorDetail,
@@ -23,6 +29,23 @@ from src.api.models import (
     SkillCloudResponse,
     SkillSearchRequest,
     StatsResponse,
+)
+from src.mcf.career_delta import (
+    BaselineMarketPosition,
+    CareerDeltaResponse,
+    FilteredScenario,
+    MarketInsight,
+    MarketPosition,
+    PivotScenarioSignal,
+    SalaryBand,
+    ScenarioChange,
+    ScenarioConfidence,
+    ScenarioDetail,
+    ScenarioScoreBreakdown,
+    ScenarioSummary,
+    ScenarioType,
+    SkillReplacement,
+    SkillScenarioSignal,
 )
 from src.mcf.embeddings.models import (
     CompanySimilarity as InternalCompanySimilarity,
@@ -226,6 +249,69 @@ class TestCompanySimilarityRequest:
         internal = req.to_internal()
         assert internal.company_name == "Google"
         assert internal.limit == 5
+
+
+class TestCareerDeltaAnalysisRequest:
+    def test_to_internal_maps_public_request_shape(self):
+        req = CareerDeltaAnalysisRequest(
+            profile_text="  Senior analyst with Python, SQL, and experimentation experience.  ",
+            current_title="  Senior Data Analyst ",
+            target_titles=[" Analytics Engineer ", "Data Scientist", "Analytics Engineer"],
+            current_categories=["Information Technology"],
+            current_skills=[" Python ", "SQL", "Python"],
+            current_company=" Example Corp ",
+            location=" Singapore ",
+            target_salary_min=90000,
+            max_scenarios=6,
+            include_filtered=False,
+            delta_types=[
+                CareerDeltaScenarioType.SKILL_ADDITION,
+                CareerDeltaScenarioType.TITLE_PIVOT,
+                CareerDeltaScenarioType.SKILL_ADDITION,
+            ],
+        )
+
+        internal = req.to_internal()
+
+        assert internal.profile_text == "Senior analyst with Python, SQL, and experimentation experience."
+        assert internal.current_title == "Senior Data Analyst"
+        assert internal.target_titles == ("Analytics Engineer", "Data Scientist")
+        assert internal.current_categories == ("Information Technology",)
+        assert internal.current_skills == ("Python", "SQL")
+        assert internal.current_company == "Example Corp"
+        assert internal.location == "Singapore"
+        assert internal.target_salary_min == 90000
+        assert internal.limit == 6
+        assert internal.include_filtered is False
+        assert req.delta_types == [
+            CareerDeltaScenarioType.SKILL_ADDITION,
+            CareerDeltaScenarioType.TITLE_PIVOT,
+        ]
+
+    def test_profile_text_rejects_whitespace_only_content(self):
+        with pytest.raises(ValidationError, match="at least 20 non-whitespace characters"):
+            CareerDeltaAnalysisRequest(profile_text=" " * 25)
+
+    def test_target_salary_min_must_be_positive_if_provided(self):
+        with pytest.raises(ValidationError):
+            CareerDeltaAnalysisRequest(
+                profile_text="Experienced engineer with Python, SQL, APIs, and cloud operations.",
+                target_salary_min=0,
+            )
+
+    def test_delta_types_reject_unknown_values(self):
+        with pytest.raises(ValidationError):
+            CareerDeltaAnalysisRequest(
+                profile_text="Experienced engineer with Python, SQL, APIs, and cloud operations.",
+                delta_types=["baseline"],
+            )
+
+    def test_target_titles_are_capped(self):
+        with pytest.raises(ValidationError):
+            CareerDeltaAnalysisRequest(
+                profile_text="Experienced engineer with Python, SQL, APIs, and cloud operations.",
+                target_titles=[f"Title {i}" for i in range(9)],
+            )
 
 
 # =============================================================================
@@ -440,3 +526,183 @@ class TestErrorResponse:
     def test_without_details(self):
         resp = ErrorResponse(error=ErrorDetail(code="NOT_FOUND", message="Job not found"))
         assert resp.error.details is None
+
+
+class TestCareerDeltaResponseModels:
+    def test_analysis_response_from_internal_maps_baseline_and_summaries(self):
+        internal = CareerDeltaResponse(
+            request=CareerDeltaAnalysisRequest(
+                profile_text="Experienced engineer with Python, SQL, APIs, and cloud operations."
+            ).to_internal(),
+            baseline=BaselineMarketPosition(
+                position=MarketPosition.COMPETITIVE,
+                reachable_jobs=18,
+                total_candidates=34,
+                fit_median=0.61,
+                fit_p90=0.82,
+                salary_band=SalaryBand(min_annual=70000, median_annual=90000, max_annual=120000),
+                top_industries=(MarketInsight(name="technology/data_and_ai", job_count=12, share_pct=35.3),),
+                top_companies=(MarketInsight(name="Example Corp", job_count=4, share_pct=11.8),),
+                extracted_skills=("Python", "SQL"),
+                skill_coverage=0.57,
+                top_skill_gaps=(MarketInsight(name="Kubernetes", job_count=5, share_pct=27.8),),
+                notes=("Candidate pool is concentrated in platform roles.",),
+                thin_market=False,
+                degraded=False,
+            ),
+            summaries=(
+                ScenarioSummary(
+                    scenario_id="skill_addition:abc",
+                    scenario_type=ScenarioType.SKILL_ADDITION,
+                    title="Add Kubernetes",
+                    summary="Add Kubernetes to unlock more platform-engineering roles.",
+                    market_position=MarketPosition.COMPETITIVE,
+                    confidence=ScenarioConfidence(
+                        score=0.82,
+                        evidence_coverage=0.63,
+                        market_sample_size=24,
+                        reasons=("repeated_gap_signal",),
+                    ),
+                    score_breakdown=ScenarioScoreBreakdown(
+                        opportunity=0.7,
+                        quality=0.6,
+                        salary=0.4,
+                        momentum=0.3,
+                        diversity=0.2,
+                        raw_score=0.68,
+                        pivot_cost=0.0,
+                        final_score=0.68,
+                    ),
+                    change=ScenarioChange(
+                        added_skills=("Kubernetes",),
+                        source_title_family="data-engineer",
+                        target_title_family="platform-engineer",
+                    ),
+                    signals=(
+                        SkillScenarioSignal(
+                            skill="Kubernetes",
+                            supporting_jobs=4,
+                            supporting_share_pct=33.3,
+                            market_job_count=28,
+                            market_salary_annual_median=110000,
+                            market_momentum=0.14,
+                            salary_lift_pct=0.09,
+                            similarity=0.72,
+                            same_cluster=False,
+                        ),
+                    ),
+                    target_title="Platform Engineer",
+                    target_sector="technology/platform",
+                    expected_salary_delta_pct=0.09,
+                ),
+            ),
+            filtered_scenarios=(
+                FilteredScenario(
+                    scenario_id="title_pivot:def",
+                    scenario_type=ScenarioType.TITLE_PIVOT,
+                    reason_code="overlapping_scenario",
+                    explanation="A materially overlapping scenario with lower pivot cost was kept instead.",
+                    confidence=ScenarioConfidence(score=0.66, evidence_coverage=0.45, market_sample_size=18),
+                    market_position=MarketPosition.STRETCH,
+                ),
+            ),
+            degraded=False,
+            thin_market=False,
+        )
+
+        response = CareerDeltaAnalysisResponse.from_internal(internal, analysis_time_ms=42.5)
+
+        assert response.analysis_time_ms == 42.5
+        assert response.baseline is not None
+        assert response.baseline.position.value == "competitive"
+        assert response.baseline.salary_band.median_annual == 90000
+        assert response.scenarios[0].scenario_type.value == "skill_addition"
+        assert response.scenarios[0].change is not None
+        assert response.scenarios[0].change.added_skills == ["Kubernetes"]
+        assert response.scenarios[0].signals[0].signal_type == "skill"
+        assert response.filtered_scenarios[0].reason_code == "overlapping_scenario"
+        assert response.filtered_scenarios[0].market_position.value == "stretch"
+
+    def test_scenario_detail_from_internal_maps_nested_summary_and_pivot_signal(self):
+        summary = ScenarioSummary(
+            scenario_id="title_pivot:abc",
+            scenario_type=ScenarioType.TITLE_PIVOT,
+            title="Pivot toward Platform Engineer",
+            summary="Shift toward platform engineering roles.",
+            market_position=MarketPosition.STRETCH,
+            confidence=ScenarioConfidence(score=0.74, evidence_coverage=0.52, market_sample_size=21),
+        )
+        internal = ScenarioDetail(
+            scenario_id="title_pivot:abc",
+            scenario_type=ScenarioType.TITLE_PIVOT,
+            title="Pivot toward Platform Engineer",
+            narrative="Platform roles show better demand and salary than the current lane.",
+            market_position=MarketPosition.STRETCH,
+            confidence=ScenarioConfidence(
+                score=0.74,
+                evidence_coverage=0.52,
+                market_sample_size=21,
+                reasons=("adjacent_role", "salary_lift"),
+            ),
+            score_breakdown=ScenarioScoreBreakdown(final_score=0.61, pivot_cost=0.18),
+            summary=summary,
+            change=ScenarioChange(
+                source_title_family="data-engineer",
+                target_title_family="platform-engineer",
+                source_industry="technology/data_and_ai",
+                target_industry="technology/platform",
+                replaced_skills=(SkillReplacement(from_skill="Airflow", to_skill="Kubernetes"),),
+            ),
+            signals=(
+                PivotScenarioSignal(
+                    supporting_jobs=5,
+                    supporting_share_pct=41.7,
+                    target_title_family="platform-engineer",
+                    target_industry="technology/platform",
+                    title_distance="adjacent",
+                    industry_distance=1,
+                    fit_median=0.69,
+                    market_job_count=26,
+                    market_salary_annual_median=118000,
+                    market_momentum=0.12,
+                    salary_lift_pct=0.11,
+                ),
+            ),
+            target_title="Platform Engineer",
+            target_sector="technology/platform",
+            evidence=("5 reachable jobs point to platform engineering.",),
+            missing_skills=("Kubernetes",),
+            search_queries=("platform engineer kubernetes",),
+            thin_market=False,
+            degraded=False,
+        )
+
+        detail = CareerDeltaScenarioDetail.from_internal(internal)
+
+        assert detail.scenario_type is CareerDeltaScenarioType.TITLE_PIVOT
+        assert detail.summary is not None
+        assert detail.summary.scenario_id == "title_pivot:abc"
+        assert detail.change is not None
+        assert detail.change.replaced_skills[0].to_skill == "Kubernetes"
+        assert detail.signals[0].signal_type == "pivot"
+        assert detail.signals[0].target_title_family == "platform-engineer"
+        assert detail.confidence.reasons == ["adjacent_role", "salary_lift"]
+
+    def test_filtered_scenario_and_confidence_models_are_readable(self):
+        filtered = CareerDeltaFilteredScenario.from_internal(
+            FilteredScenario(
+                scenario_id="skill_substitution:abc",
+                scenario_type=ScenarioType.SKILL_SUBSTITUTION,
+                reason_code="low_signal",
+                explanation="Only one weak supporting job was available.",
+                confidence=ScenarioConfidence(score=0.31, evidence_coverage=0.15, market_sample_size=3),
+                market_position=MarketPosition.UNCLEAR,
+            )
+        )
+        confidence = CareerDeltaConfidence.from_internal(
+            ScenarioConfidence(score=0.91, evidence_coverage=0.8, market_sample_size=30, reasons=("broad_support",))
+        )
+
+        assert filtered.scenario_type is CareerDeltaScenarioType.SKILL_SUBSTITUTION
+        assert filtered.reason_code == "low_signal"
+        assert confidence.reasons == ["broad_support"]
