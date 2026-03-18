@@ -641,6 +641,8 @@ MIN_SUBSTITUTION_SIMILARITY = 0.72
 MIN_SUBSTITUTION_JOB_COUNT_RATIO = 1.25
 MIN_SUBSTITUTION_MOMENTUM_DELTA = 0.05
 MIN_SUBSTITUTION_SALARY_LIFT_PCT = 0.08
+MIN_MATERIAL_JOB_COUNT_DELTA = 5
+MIN_MATERIAL_JOB_COUNT_RATIO = 1.15
 MIN_TITLE_PIVOT_FIT = 0.58
 MIN_INDUSTRY_PIVOT_FIT = 0.55
 MIN_TITLE_MARKET_IMPROVEMENT = 0.03
@@ -967,18 +969,17 @@ def _generate_title_pivot_scenarios(
     if not source_title_family:
         return []
 
-    grouped = _group_candidates(
-        candidate
-        for candidate in analysis_set
-        if candidate.title_family != source_title_family
-        and (current_industry_key is None or candidate.industry_key == current_industry_key)
+    grouped = _group_title_pivot_candidates(
+        source_title_family=source_title_family,
+        current_industry_key=current_industry_key,
+        analysis_set=analysis_set,
     )
     current_title_market = (
         market_snapshot.get("current_title_family")
         or market_stats.get_title_family_stats(source_title_family)
     )
     scored: list[tuple[float, ScenarioSummary]] = []
-    for (_, target_title_family, _), group in grouped.items():
+    for target_title_family, group in grouped.items():
         dominant_title = _dominant_title(group)
         source_probe = source_title or source_title_family
         if not dominant_title or not is_adjacent_role(source_probe, dominant_title):
@@ -1006,11 +1007,12 @@ def _generate_title_pivot_scenarios(
         ):
             continue
 
+        dominant_industry_key = _dominant_industry_key(group)
         signal = PivotScenarioSignal(
             supporting_jobs=supporting_jobs,
             supporting_share_pct=round(support_share * 100, 2),
             target_title_family=target_title_family,
-            target_industry=current_industry_key or "",
+            target_industry=dominant_industry_key or "",
             title_distance="adjacent",
             industry_distance=0 if current_industry_key else None,
             fit_median=fit_median,
@@ -1050,7 +1052,7 @@ def _generate_title_pivot_scenarios(
                 ScenarioType.TITLE_PIVOT,
                 source_title_family=source_title_family,
                 target_title_family=target_title_family,
-                target_sector=current_industry_key,
+                target_sector=current_industry_key or dominant_industry_key,
                 market_position=market_position,
             ),
             scenario_type=ScenarioType.TITLE_PIVOT,
@@ -1065,11 +1067,11 @@ def _generate_title_pivot_scenarios(
                 source_title_family=source_title_family,
                 target_title_family=target_title_family,
                 source_industry=current_industry_key,
-                target_industry=current_industry_key,
+                target_industry=dominant_industry_key,
             ),
             signals=(signal,),
             target_title=dominant_title,
-            target_sector=current_industry_key,
+            target_sector=current_industry_key or dominant_industry_key,
             thin_market=baseline.thin_market,
             degraded=baseline.degraded,
             expected_salary_delta_pct=salary_lift_pct,
@@ -1377,6 +1379,22 @@ def _group_candidates(candidates) -> dict[tuple[str, str, str], list[CareerDelta
     return grouped
 
 
+def _group_title_pivot_candidates(
+    *,
+    source_title_family: str,
+    current_industry_key: Optional[str],
+    analysis_set: list[CareerDeltaCandidate],
+) -> dict[str, list[CareerDeltaCandidate]]:
+    grouped: dict[str, list[CareerDeltaCandidate]] = {}
+    for candidate in analysis_set:
+        if candidate.title_family == source_title_family:
+            continue
+        if current_industry_key is not None and candidate.industry_key != current_industry_key:
+            continue
+        grouped.setdefault(candidate.title_family, []).append(candidate)
+    return grouped
+
+
 def _analysis_candidates(candidate_pool: CareerDeltaCandidatePool) -> list[CareerDeltaCandidate]:
     reachable = [
         candidate for candidate in candidate_pool.candidates if candidate.overall_fit >= REACHABLE_FIT_THRESHOLD
@@ -1391,6 +1409,15 @@ def _normalize_skill_inventory(skills: tuple[str, ...]) -> dict[str, str]:
         if cleaned:
             normalized.setdefault(cleaned.lower(), cleaned)
     return normalized
+
+
+def _dominant_industry_key(candidates: list[CareerDeltaCandidate]) -> Optional[str]:
+    if not candidates:
+        return None
+    counts = Counter(candidate.industry_key for candidate in candidates if candidate.industry_key)
+    if not counts:
+        return None
+    return sorted(counts.items(), key=lambda item: (item[1], item[0]), reverse=True)[0][0]
 
 
 def _resolve_source_title(request: CareerDeltaRequest, analysis_set: list[CareerDeltaCandidate]) -> Optional[str]:
@@ -1500,7 +1527,9 @@ def _has_material_improvement(
     *,
     threshold: float,
 ) -> bool:
-    if target_market.job_count > current_market.job_count:
+    count_delta = target_market.job_count - current_market.job_count
+    count_ratio = target_market.job_count / max(current_market.job_count, 1)
+    if count_delta >= MIN_MATERIAL_JOB_COUNT_DELTA and count_ratio >= MIN_MATERIAL_JOB_COUNT_RATIO:
         return True
     if _market_delta(target_market.momentum, current_market.momentum) >= threshold:
         return True
