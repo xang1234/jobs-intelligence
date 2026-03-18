@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 
 from src.mcf.database import MCFDatabase
+from src.mcf.models import Category
 from tests.conftest import requires_faiss
 from tests.factories import generate_company_job_set
 
@@ -499,3 +500,76 @@ class TestGenerateAllIncludesCompanies:
             )
 
         assert stats.companies_processed == 3
+
+    def test_generate_all_populates_normalized_columns_for_jobs_missing_embeddings(self, temp_dir):
+        """Incremental embed-sync should populate persisted normalized metadata for processed jobs."""
+        from src.mcf.embeddings import EmbeddingGenerator
+        from tests.factories import generate_test_job
+
+        db = MCFDatabase(str(temp_dir / "missing-embeddings.db"))
+        job = generate_test_job(title="Lead Product Manager", skills=["Python", "SQL"])
+        job.categories = [Category(category="Information Technology", id=1)]
+        db.upsert_job(job)
+
+        with db._connection() as conn:
+            conn.execute(
+                """
+                UPDATE jobs
+                SET title_family = NULL, industry_bucket = NULL
+                WHERE uuid = ?
+                """,
+                (job.uuid,),
+            )
+
+        generator = EmbeddingGenerator()
+        mock_embeddings = np.random.randn(384).astype(np.float32)
+        mock_embeddings = mock_embeddings / np.linalg.norm(mock_embeddings)
+
+        with patch.object(generator, "_model") as mock_model:
+            mock_model.encode = lambda text, **kwargs: (
+                mock_embeddings if isinstance(text, str) else np.tile(mock_embeddings, (len(text), 1))
+            )
+            generator._model = mock_model
+            generator.generate_all(db, skip_existing=True)
+
+        stored = db.get_job(job.uuid)
+        assert stored is not None
+        assert stored["title_family"] == "product-manager"
+        assert stored["industry_bucket"] == "technology/software_and_platforms"
+
+    def test_generate_all_refresh_populates_normalized_columns_for_embedded_jobs(self, temp_dir):
+        """Full refresh runs should also heal persisted normalized metadata drift."""
+        from src.mcf.embeddings import EmbeddingGenerator
+        from tests.factories import generate_test_job
+
+        db = MCFDatabase(str(temp_dir / "refresh.db"))
+        job = generate_test_job(title="Lead Product Manager", skills=["Python", "SQL"])
+        job.categories = [Category(category="Information Technology", id=1)]
+        db.upsert_job(job)
+        db.upsert_embedding(job.uuid, "job", np.ones(384, dtype=np.float32) / np.sqrt(384))
+
+        with db._connection() as conn:
+            conn.execute(
+                """
+                UPDATE jobs
+                SET title_family = NULL, industry_bucket = NULL
+                WHERE uuid = ?
+                """,
+                (job.uuid,),
+            )
+
+        generator = EmbeddingGenerator()
+        mock_embeddings = np.random.randn(384).astype(np.float32)
+        mock_embeddings = mock_embeddings / np.linalg.norm(mock_embeddings)
+
+        with patch.object(generator, "_model") as mock_model:
+            mock_model.encode = lambda text, **kwargs: (
+                mock_embeddings if isinstance(text, str) else np.tile(mock_embeddings, (len(text), 1))
+            )
+            generator._model = mock_model
+            generator.generate_all(db, skip_existing=False)
+
+        stored = db.get_job(job.uuid)
+        assert stored is not None
+        assert stored["title_family"] == "product-manager"
+        assert stored["industry_bucket"] == "technology/software_and_platforms"

@@ -491,6 +491,8 @@ class EmbeddingGenerator:
         if skip_existing:
             jobs_to_process = db.get_jobs_without_embeddings(limit=1000000)
             stats.jobs_total = len(jobs_to_process)
+            if jobs_to_process:
+                db.populate_normalized_job_metadata([job["uuid"] for job in jobs_to_process])
         else:
             stats.jobs_total = db.count_jobs()
             jobs_to_process = None
@@ -502,6 +504,8 @@ class EmbeddingGenerator:
             # Process all jobs (need to iterate through them)
             all_uuids = list(db.get_all_uuids())
             stats.jobs_total = len(all_uuids)
+            if all_uuids:
+                db.populate_normalized_job_metadata(all_uuids)
 
             for i in range(0, len(all_uuids), batch_size):
                 batch_uuids = all_uuids[i : i + batch_size]

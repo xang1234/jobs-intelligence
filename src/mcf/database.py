@@ -382,43 +382,9 @@ class MCFDatabase:
             if added_columns:
                 logger.info("Added normalized taxonomy columns to jobs table")
 
-            rows = conn.execute(
-                """
-                SELECT uuid, title, categories, skills
-                FROM jobs
-                WHERE title_family IS NULL OR industry_bucket IS NULL
-                """
-            ).fetchall()
-
-            if not rows:
-                return
-
-            updates = []
-            for row in rows:
-                title_family, industry_bucket = self._derive_normalized_job_metadata(
-                    title=row["title"],
-                    categories=row["categories"],
-                    skills=row["skills"],
-                )
-                updates.append(
-                    {
-                        "uuid": row["uuid"],
-                        "title_family": title_family,
-                        "industry_bucket": industry_bucket,
-                    }
-                )
-
-            conn.executemany(
-                """
-                UPDATE jobs
-                SET title_family = :title_family,
-                    industry_bucket = :industry_bucket
-                WHERE uuid = :uuid
-                """,
-                updates,
-            )
-            conn.commit()
-            logger.info("Normalized job metadata migration complete for %s rows", len(updates))
+        updated = self.populate_normalized_job_metadata(only_missing=True)
+        if updated:
+            logger.info("Normalized job metadata migration complete for %s rows", updated)
 
     def _ensure_fts5(self) -> None:
         """
@@ -618,6 +584,95 @@ class MCFDatabase:
         )
         industry_bucket = f"{classification.sector}/{classification.subsector}"
         return title_family, industry_bucket
+
+    def populate_normalized_job_metadata(
+        self,
+        uuids: Optional[list[str]] = None,
+        *,
+        only_missing: bool = False,
+        chunk_size: int = 500,
+    ) -> int:
+        """
+        Populate persisted normalized metadata for all or a subset of jobs.
+
+        Args:
+            uuids: Optional list of job UUIDs to restrict updates to
+            only_missing: Only fill rows with missing normalized columns
+            chunk_size: Chunk size for UUID-restricted queries
+
+        Returns:
+            Number of job rows updated
+        """
+        total_updated = 0
+        uuid_chunks = [uuids[i : i + chunk_size] for i in range(0, len(uuids), chunk_size)] if uuids else [None]
+
+        with self._connection() as conn:
+            for chunk in uuid_chunks:
+                rows, params = self._select_jobs_for_normalized_metadata(
+                    conn,
+                    uuids=chunk,
+                    only_missing=only_missing,
+                )
+                if not rows:
+                    continue
+
+                updates = []
+                for row in rows:
+                    title_family, industry_bucket = self._derive_normalized_job_metadata(
+                        title=row["title"],
+                        categories=row["categories"],
+                        skills=row["skills"],
+                    )
+                    updates.append(
+                        {
+                            "uuid": row["uuid"],
+                            "title_family": title_family,
+                            "industry_bucket": industry_bucket,
+                        }
+                    )
+
+                conn.executemany(
+                    """
+                    UPDATE jobs
+                    SET title_family = :title_family,
+                        industry_bucket = :industry_bucket
+                    WHERE uuid = :uuid
+                    """,
+                    updates,
+                )
+                total_updated += len(updates)
+
+        return total_updated
+
+    @staticmethod
+    def _select_jobs_for_normalized_metadata(
+        conn: sqlite3.Connection,
+        *,
+        uuids: Optional[list[str]],
+        only_missing: bool,
+    ) -> tuple[list[sqlite3.Row], list[str]]:
+        """Select jobs that should receive normalized metadata updates."""
+        conditions: list[str] = []
+        params: list[str] = []
+
+        if uuids:
+            placeholders = ",".join("?" for _ in uuids)
+            conditions.append(f"uuid IN ({placeholders})")
+            params.extend(uuids)
+
+        if only_missing:
+            conditions.append("(title_family IS NULL OR industry_bucket IS NULL)")
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        rows = conn.execute(
+            f"""
+            SELECT uuid, title, categories, skills
+            FROM jobs
+            {where_clause}
+            """,
+            params,
+        ).fetchall()
+        return rows, params
 
     @staticmethod
     def _calculate_annual_salary(
