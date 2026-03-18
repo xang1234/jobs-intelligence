@@ -27,8 +27,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from ..mcf.career_delta import (
-    CareerDeltaCandidate,
-    CareerDeltaCandidatePool,
     CareerDeltaDependencies,
     CareerDeltaEngine,
     CareerDeltaResponse,
@@ -143,43 +141,6 @@ def _filter_detail_summaries(
     return [summary for summary in response.summaries if summary.scenario_type.value in allowed]
 
 
-def _supporting_candidates(
-    summary: ScenarioSummary,
-    candidate_pool: Optional[CareerDeltaCandidatePool],
-) -> list[CareerDeltaCandidate]:
-    if candidate_pool is None:
-        return []
-
-    candidates = list(candidate_pool.candidates)
-    change = summary.change
-    if change is not None:
-        if change.target_title_family:
-            narrowed = [candidate for candidate in candidates if candidate.title_family == change.target_title_family]
-            if narrowed:
-                candidates = narrowed
-        target_industry = change.target_industry or summary.target_sector
-        if target_industry:
-            narrowed = [candidate for candidate in candidates if candidate.industry_key == target_industry]
-            if narrowed:
-                candidates = narrowed
-        added_skills = set(change.added_skills)
-        replacement_skills = {item.to_skill for item in change.replaced_skills}
-        if added_skills:
-            narrowed = [
-                candidate
-                for candidate in candidates
-                if added_skills.intersection(candidate.gap_skills) or added_skills.intersection(candidate.skills)
-            ]
-            if narrowed:
-                candidates = narrowed
-        if replacement_skills:
-            narrowed = [candidate for candidate in candidates if replacement_skills.intersection(candidate.skills)]
-            if narrowed:
-                candidates = narrowed
-
-    return sorted(candidates, key=lambda candidate: candidate.overall_fit, reverse=True)[:5]
-
-
 def _detail_narrative(summary: ScenarioSummary) -> str:
     change = summary.change
     if change and change.added_skills:
@@ -191,10 +152,10 @@ def _detail_narrative(summary: ScenarioSummary) -> str:
     if summary.target_title or (change and change.target_title_family):
         target = summary.target_title or change.target_title_family
         return f"{summary.summary} Use this scenario as a probe for {target} roles rather than an all-at-once rewrite."
-    return f"{summary.summary} Review the supporting evidence before treating it as an action plan."
+    return f"{summary.summary} Review the scenario signals before treating it as an action plan."
 
 
-def _detail_evidence(summary: ScenarioSummary, candidates: list[CareerDeltaCandidate]) -> tuple[str, ...]:
+def _detail_evidence(summary: ScenarioSummary) -> tuple[str, ...]:
     evidence: list[str] = [summary.summary]
     for signal in summary.signals:
         if isinstance(signal, SkillScenarioSignal):
@@ -207,22 +168,16 @@ def _detail_evidence(summary: ScenarioSummary, candidates: list[CareerDeltaCandi
                 f"{signal.supporting_jobs} reachable jobs support {signal.target_title_family} "
                 f"in {signal.target_industry} ({signal.supporting_share_pct:.1f}% share)."
             )
-    if candidates:
-        examples = "; ".join(f"{candidate.title} at {candidate.company_name}" for candidate in candidates[:3])
-        evidence.append(f"Representative jobs: {examples}.")
     return tuple(evidence[:5])
 
 
-def _detail_missing_skills(summary: ScenarioSummary, candidates: list[CareerDeltaCandidate]) -> tuple[str, ...]:
+def _detail_missing_skills(summary: ScenarioSummary) -> tuple[str, ...]:
     change = summary.change
     if change is None:
         return ()
 
     missing: list[str] = list(change.added_skills)
     missing.extend(item.to_skill for item in change.replaced_skills)
-    if candidates:
-        pool_missing = sorted({skill for candidate in candidates for skill in candidate.missing_skills})
-        missing.extend(pool_missing[:5])
 
     deduped: list[str] = []
     seen: set[str] = set()
@@ -232,13 +187,12 @@ def _detail_missing_skills(summary: ScenarioSummary, candidates: list[CareerDelt
             continue
         seen.add(key)
         deduped.append(skill)
-    return tuple(deduped[:8])
+    return tuple(deduped[:6])
 
 
-def _detail_search_queries(summary: ScenarioSummary, response: CareerDeltaResponse) -> tuple[str, ...]:
+def _detail_search_queries(summary: ScenarioSummary) -> tuple[str, ...]:
     change = summary.change
     queries: list[str] = []
-    location = response.request.location
     if summary.target_title:
         queries.append(summary.target_title)
     elif change and change.target_title_family:
@@ -247,8 +201,6 @@ def _detail_search_queries(summary: ScenarioSummary, response: CareerDeltaRespon
         queries.append(skill)
     for replacement in change.replaced_skills if change else ():
         queries.append(replacement.to_skill)
-    if location and queries:
-        queries = [f"{query} {location}" for query in queries]
 
     deduped: list[str] = []
     seen: set[str] = set()
@@ -263,7 +215,6 @@ def _detail_search_queries(summary: ScenarioSummary, response: CareerDeltaRespon
 
 
 def _build_scenario_detail(summary: ScenarioSummary, response: CareerDeltaResponse) -> ScenarioDetail:
-    candidates = _supporting_candidates(summary, response.candidate_pool)
     return ScenarioDetail(
         scenario_id=summary.scenario_id,
         scenario_type=summary.scenario_type,
@@ -277,9 +228,9 @@ def _build_scenario_detail(summary: ScenarioSummary, response: CareerDeltaRespon
         signals=summary.signals,
         target_title=summary.target_title,
         target_sector=summary.target_sector,
-        evidence=_detail_evidence(summary, candidates),
-        missing_skills=_detail_missing_skills(summary, candidates),
-        search_queries=_detail_search_queries(summary, response),
+        evidence=_detail_evidence(summary),
+        missing_skills=_detail_missing_skills(summary),
+        search_queries=_detail_search_queries(summary),
         thin_market=summary.thin_market,
         degraded=summary.degraded,
     )

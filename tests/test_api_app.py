@@ -651,6 +651,7 @@ class TestCareerDeltaEndpoint:
         assert data["title"] == "Add Kubernetes"
         assert data["summary"]["scenario_id"] == "skill_addition:abc"
         assert data["evidence"][0] == "Add Kubernetes to access more platform roles."
+        assert data["search_queries"] == []
 
     def test_career_delta_detail_404_when_unknown(self, client):
         resp = client.get("/api/career-delta/missing-scenario/detail")
@@ -692,6 +693,63 @@ class TestCareerDeltaEndpoint:
             assert detail_resp.json()["error"]["message"] == "Unknown or expired scenario_id: title_pivot:abc"
         finally:
             app_module._search_engine = None
+
+    def test_career_delta_detail_cache_is_not_request_specific(self, client, mock_engine):
+        mock_engine._career_delta_engine = MagicMock()
+        mock_engine._career_delta_engine.analyze.side_effect = [
+            CareerDeltaResponse(
+                request=MagicMock(location="Singapore"),
+                summaries=(
+                    ScenarioSummary(
+                        scenario_id="title_pivot:shared",
+                        scenario_type=ScenarioType.TITLE_PIVOT,
+                        title="Pivot toward Platform Engineer",
+                        summary="Move into platform engineering.",
+                        market_position=MarketPosition.STRETCH,
+                        confidence=ScenarioConfidence(score=0.7, evidence_coverage=0.5, market_sample_size=16),
+                        target_title="Platform Engineer",
+                    ),
+                ),
+            ),
+            CareerDeltaResponse(
+                request=MagicMock(location="Tokyo"),
+                summaries=(
+                    ScenarioSummary(
+                        scenario_id="title_pivot:shared",
+                        scenario_type=ScenarioType.TITLE_PIVOT,
+                        title="Pivot toward Platform Engineer",
+                        summary="Move into platform engineering.",
+                        market_position=MarketPosition.STRETCH,
+                        confidence=ScenarioConfidence(score=0.7, evidence_coverage=0.5, market_sample_size=16),
+                        target_title="Platform Engineer",
+                    ),
+                ),
+            ),
+        ]
+
+        first = client.post(
+            "/api/career-delta",
+            json={
+                "profile_text": "Senior data analyst with Python, SQL, and dashboarding experience.",
+                "location": "Singapore",
+            },
+        )
+        second = client.post(
+            "/api/career-delta",
+            json={
+                "profile_text": "Senior data analyst with Python, SQL, and dashboarding experience.",
+                "location": "Tokyo",
+            },
+        )
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+
+        detail_resp = client.get("/api/career-delta/title_pivot:shared/detail")
+        assert detail_resp.status_code == 200
+        data = detail_resp.json()
+        assert data["search_queries"] == ["Platform Engineer"]
+        assert all("Singapore" not in query and "Tokyo" not in query for query in data["search_queries"])
 
     def test_career_delta_analysis_filters_requested_types(self, client, mock_engine):
         mock_engine._career_delta_engine = MagicMock()
