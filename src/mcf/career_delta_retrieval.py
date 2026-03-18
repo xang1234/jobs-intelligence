@@ -13,7 +13,13 @@ from collections import defaultdict
 from .career_delta import CareerDeltaCandidate, CareerDeltaCandidatePool, CareerDeltaRequest
 from .embeddings.models import SearchRequest
 from .embeddings.search_engine import SemanticSearchEngine
-from .industry_taxonomy import IndustryClassification, classify_industry, normalize_categories, normalize_title_family
+from .industry_taxonomy import (
+    IndustryClassification,
+    classification_from_bucket,
+    classify_industry,
+    normalize_categories,
+    normalize_title_family,
+)
 
 
 class SearchEngineCareerDeltaProvider:
@@ -103,10 +109,16 @@ class SearchEngineCareerDeltaProvider:
             overall_fit = sum(weight * value for weight, value in weighted_parts) / total_weight
 
             company_name = (job.get("company_name") or "").strip()
-            industry = classify_industry(
-                normalize_categories(self._split_csv(job.get("categories"))),
-                company_classifications=company_direct_industries.get(company_name, ()),
-                skills=job_skills,
+            industry = classification_from_bucket(job.get("industry_bucket"))
+            if industry.is_unknown:
+                industry = classify_industry(
+                    normalize_categories(self._split_csv(job.get("categories"))),
+                    company_classifications=company_direct_industries.get(company_name, ()),
+                    skills=job_skills,
+                )
+            title_family = (
+                (job.get("title_family") or "").strip()
+                or normalize_title_family(job.get("title", "")).canonical
             )
 
             candidates.append(
@@ -114,7 +126,7 @@ class SearchEngineCareerDeltaProvider:
                     uuid=job["uuid"],
                     title=job.get("title", ""),
                     company_name=company_name,
-                    title_family=normalize_title_family(job.get("title", "")).canonical,
+                    title_family=title_family,
                     target_title_match=title_match,
                     industry_key=f"{industry.sector}/{industry.subsector}",
                     industry_label=f"{industry.sector} / {industry.subsector}",
@@ -176,7 +188,9 @@ class SearchEngineCareerDeltaProvider:
             company_name = (row.get("company_name") or "").strip()
             if not company_name:
                 continue
-            direct = classify_industry(SearchEngineCareerDeltaProvider._split_csv(row.get("categories")))
+            direct = classification_from_bucket(row.get("industry_bucket"))
+            if direct.is_unknown:
+                direct = classify_industry(SearchEngineCareerDeltaProvider._split_csv(row.get("categories")))
             if not direct.is_unknown:
                 by_company[company_name].append(direct)
         return by_company

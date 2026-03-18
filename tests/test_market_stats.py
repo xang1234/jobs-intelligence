@@ -191,3 +191,35 @@ def test_market_snapshot_returns_request_relevant_aggregates(empty_db):
     assert snapshot["current_title_family"].key == "product-manager"
     assert snapshot["skills"]["SQL"].job_count == 1
     assert snapshot["target_title_families"]["Product Manager"].key == "product-manager"
+
+
+def test_market_stats_use_persisted_normalized_columns_for_aggregates(empty_db):
+    _insert_job(
+        empty_db,
+        title="Lead Product Manager",
+        company_name="Alpha",
+        skills=["Python", "SQL"],
+        categories=["Information Technology"],
+        posted_days_ago=2,
+        salary_min=10000,
+        salary_max=13000,
+    )
+
+    with empty_db._connection() as conn:
+        conn.execute(
+            """
+            UPDATE jobs
+            SET title = '',
+                categories = '',
+                title_family = 'product-manager',
+                industry_bucket = 'technology/software_and_platforms'
+            """
+        )
+
+    cache = MarketStatsCache(empty_db, months=3)
+
+    title_aggregate = cache.get_title_family_stats("Lead Product Manager")
+    industry_aggregate = cache.get_industry_stats("technology/software_and_platforms")
+
+    assert title_aggregate.job_count == 1
+    assert industry_aggregate.job_count == 1

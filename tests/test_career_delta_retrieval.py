@@ -244,3 +244,44 @@ def test_market_snapshot_prefers_explicit_categories_over_company_fallback(temp_
     )
 
     assert snapshot["current_industry"].key == "commercial/marketing_and_brand"
+
+
+def test_provider_uses_persisted_normalized_columns_when_raw_fields_drift(temp_dir, empty_db):
+    _insert_job(
+        empty_db,
+        title="Lead Product Manager",
+        company_name="Insight Labs",
+        skills=["Python", "SQL"],
+        categories=["Information Technology"],
+        posted_days_ago=2,
+        salary_min=12000,
+        salary_max=15000,
+    )
+
+    with empty_db._connection() as conn:
+        conn.execute(
+            """
+            UPDATE jobs
+            SET title = '',
+                categories = '',
+                title_family = 'product-manager',
+                industry_bucket = 'technology/software_and_platforms'
+            """
+        )
+
+    engine = SemanticSearchEngine(
+        db_path=str(empty_db.db_path),
+        index_dir=temp_dir / "missing-indexes",
+    )
+    provider = SearchEngineCareerDeltaProvider(engine, minimum_pool_size=10)
+
+    pool = provider.build_candidate_pool(
+        CareerDeltaRequest(
+            profile_text="Product leader with Python and SQL experience.",
+            target_titles=("Product Manager",),
+            limit=5,
+        )
+    )
+
+    assert pool.candidates[0].title_family == "product-manager"
+    assert pool.candidates[0].industry_key == "technology/software_and_platforms"

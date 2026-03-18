@@ -263,6 +263,18 @@ def classify_industry(
     return IndustryClassification(normalized_categories=normalized_categories)
 
 
+def classification_from_bucket(bucket: str | None) -> IndustryClassification:
+    """Parse a persisted `sector/subsector` bucket into an IndustryClassification."""
+    normalized = (bucket or "").strip().lower()
+    if not normalized or "/" not in normalized:
+        return IndustryClassification()
+
+    sector, subsector = normalized.split("/", 1)
+    if not sector or not subsector:
+        return IndustryClassification()
+    return IndustryClassification(sector=sector, subsector=subsector)
+
+
 def infer_company_dominant_industry(
     company_classifications: Iterable[IndustryClassification],
     *,

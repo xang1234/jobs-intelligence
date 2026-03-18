@@ -19,6 +19,7 @@ from .career_delta import CareerDeltaRequest
 from .database import MCFDatabase
 from .industry_taxonomy import (
     IndustryClassification,
+    classification_from_bucket,
     classify_industry,
     infer_company_dominant_industry,
     normalize_title_family,
@@ -160,7 +161,7 @@ class MarketStatsCache:
 
         for row in rows:
             company_name = (row["company_name"] or "").strip()
-            direct = classify_industry(self._split_csv(row["categories"]))
+            direct = classification_from_bucket(row["industry_bucket"])
             if company_name and not direct.is_unknown:
                 company_direct_industries[company_name].append(direct)
 
@@ -184,17 +185,19 @@ class MarketStatsCache:
                 if salary is not None:
                     skill_salarys[key][month].append(salary)
 
-            title_family = normalize_title_family(row["title"] or "")
-            title_counts[title_family.canonical][month] += 1
+            title_family = (row["title_family"] or "").strip() or normalize_title_family(row["title"] or "").canonical
+            title_counts[title_family][month] += 1
             if salary is not None:
-                title_salarys[title_family.canonical][month].append(salary)
+                title_salarys[title_family][month].append(salary)
 
             company_name = (row["company_name"] or "").strip()
-            classification = classify_industry(
-                self._split_csv(row["categories"]),
-                company_classifications=company_direct_industries.get(company_name, ()),
-                skills=skills,
-            )
+            classification = classification_from_bucket(row["industry_bucket"])
+            if classification.is_unknown:
+                classification = classify_industry(
+                    self._split_csv(row["categories"]),
+                    company_classifications=company_direct_industries.get(company_name, ()),
+                    skills=skills,
+                )
             industry_key = self._industry_key(classification)
             industry_labels[industry_key] = self._industry_label(classification)
             industry_counts[industry_key][month] += 1
@@ -244,7 +247,7 @@ class MarketStatsCache:
             return conn.execute(
                 """
                 SELECT posted_date, title, company_name, categories, skills,
-                       salary_annual_min, salary_annual_max
+                       salary_annual_min, salary_annual_max, title_family, industry_bucket
                 FROM jobs
                 WHERE posted_date IS NOT NULL
                   AND posted_date >= ?
