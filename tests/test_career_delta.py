@@ -20,16 +20,34 @@ class _TaxonomyStub:
 
 
 class _MarketStatsStub:
-    def __init__(self, *, skills=None):
+    def __init__(self, *, skills=None, title_families=None, industries=None, snapshot=None):
         self.skills = skills or {}
+        self.title_families = title_families or {}
+        self.industries = industries or {}
+        self.snapshot = snapshot or {"current_industry": None, "current_title_family": None}
 
     def get_market_snapshot(self, request):
-        return {"current_industry": None}
+        return self.snapshot
 
     def get_skill_stats(self, skill: str):
         return self.skills.get(
             skill,
             MarketAggregate(key=skill.lower(), label=skill, kind="skill"),
+        )
+
+    def get_title_family_stats(self, title_or_family: str):
+        return self.title_families.get(
+            title_or_family,
+            self.title_families.get(
+                title_or_family.lower(),
+                MarketAggregate(key=title_or_family.lower(), label=title_or_family, kind="title_family"),
+            ),
+        )
+
+    def get_industry_stats(self, industry: str):
+        return self.industries.get(
+            industry,
+            MarketAggregate(key=industry.lower(), label=industry, kind="industry"),
         )
 
 
@@ -50,6 +68,9 @@ def _candidate(
     *,
     uuid: str,
     title: str = "Data Engineer",
+    title_family: str = "data-engineer",
+    industry_key: str = "technology/software_and_platforms",
+    industry_label: str = "technology / software_and_platforms",
     overall_fit: float = 0.72,
     skills: tuple[str, ...] = (),
     gap_skills: tuple[str, ...] = (),
@@ -58,9 +79,9 @@ def _candidate(
         uuid=uuid,
         title=title,
         company_name="Example Co",
-        title_family="data-engineer",
-        industry_key="technology/software_and_platforms",
-        industry_label="technology / software_and_platforms",
+        title_family=title_family,
+        industry_key=industry_key,
+        industry_label=industry_label,
         overall_fit=overall_fit,
         retrieval_score=0.8,
         matched_skills=("Python",),
@@ -384,6 +405,321 @@ class TestCareerDeltaEngine:
         )
 
         assert all(summary.scenario_type != ScenarioType.SKILL_SUBSTITUTION for summary in response.summaries)
+
+    def test_engine_generates_grounded_title_pivot_scenarios(self):
+        pool = CareerDeltaCandidatePool(
+            candidates=(
+                _candidate(
+                    uuid="1",
+                    title="Data Scientist",
+                    title_family="data-scientist",
+                    industry_key="technology/data_and_ai",
+                    industry_label="technology / data_and_ai",
+                    overall_fit=0.71,
+                ),
+                _candidate(
+                    uuid="2",
+                    title="Data Scientist",
+                    title_family="data-scientist",
+                    industry_key="technology/data_and_ai",
+                    industry_label="technology / data_and_ai",
+                    overall_fit=0.69,
+                ),
+            ),
+            extracted_skills=("Python", "SQL"),
+            total_candidates=18,
+        )
+        dependencies = CareerDeltaDependencies(
+            taxonomy=_TaxonomyStub(),
+            market_stats=_MarketStatsStub(
+                title_families={
+                    "data-analyst": MarketAggregate(
+                        key="data-analyst",
+                        label="data-analyst",
+                        kind="title_family",
+                        job_count=20,
+                        median_salary_annual=120000,
+                        momentum=0.03,
+                    ),
+                    "data-scientist": MarketAggregate(
+                        key="data-scientist",
+                        label="data-scientist",
+                        kind="title_family",
+                        job_count=35,
+                        median_salary_annual=145000,
+                        momentum=0.11,
+                    ),
+                },
+                snapshot={
+                    "current_industry": MarketAggregate(
+                        key="technology/data_and_ai",
+                        label="technology / data_and_ai",
+                        kind="industry",
+                        job_count=50,
+                    ),
+                    "current_title_family": MarketAggregate(
+                        key="data-analyst",
+                        label="data-analyst",
+                        kind="title_family",
+                        job_count=20,
+                        median_salary_annual=120000,
+                        momentum=0.03,
+                    ),
+                },
+            ),
+            search_scoring=_SearchScoringStub(pool=pool),
+        )
+
+        response = CareerDeltaEngine(dependencies).analyze(
+            CareerDeltaRequest(
+                profile_text="Data analyst with Python and SQL experience.",
+                current_title="Data Analyst",
+                current_skills=("Python", "SQL"),
+            )
+        )
+
+        pivots = [summary for summary in response.summaries if summary.scenario_type == ScenarioType.TITLE_PIVOT]
+        assert pivots
+        assert pivots[0].target_title == "Data Scientist"
+        assert pivots[0].change.target_title_family == "data-scientist"
+
+    def test_engine_generates_same_role_industry_pivots_as_first_class_scenarios(self):
+        pool = CareerDeltaCandidatePool(
+            candidates=(
+                _candidate(
+                    uuid="1",
+                    title="Data Analyst",
+                    title_family="data-analyst",
+                    industry_key="financial_services/banking",
+                    industry_label="financial_services / banking",
+                    overall_fit=0.7,
+                ),
+                _candidate(
+                    uuid="2",
+                    title="Senior Data Analyst",
+                    title_family="data-analyst",
+                    industry_key="financial_services/banking",
+                    industry_label="financial_services / banking",
+                    overall_fit=0.68,
+                ),
+            ),
+            extracted_skills=("Python", "SQL"),
+            total_candidates=18,
+        )
+        dependencies = CareerDeltaDependencies(
+            taxonomy=_TaxonomyStub(),
+            market_stats=_MarketStatsStub(
+                industries={
+                    "technology/data_and_ai": MarketAggregate(
+                        key="technology/data_and_ai",
+                        label="technology / data_and_ai",
+                        kind="industry",
+                        job_count=20,
+                        median_salary_annual=120000,
+                        momentum=0.02,
+                    ),
+                    "financial_services/banking": MarketAggregate(
+                        key="financial_services/banking",
+                        label="financial_services / banking",
+                        kind="industry",
+                        job_count=40,
+                        median_salary_annual=150000,
+                        momentum=0.1,
+                    ),
+                },
+                snapshot={
+                    "current_industry": MarketAggregate(
+                        key="technology/data_and_ai",
+                        label="technology / data_and_ai",
+                        kind="industry",
+                        job_count=20,
+                        median_salary_annual=120000,
+                        momentum=0.02,
+                    ),
+                    "current_title_family": MarketAggregate(
+                        key="data-analyst",
+                        label="data-analyst",
+                        kind="title_family",
+                        job_count=20,
+                    ),
+                },
+            ),
+            search_scoring=_SearchScoringStub(pool=pool),
+        )
+
+        response = CareerDeltaEngine(dependencies).analyze(
+            CareerDeltaRequest(
+                profile_text="Data analyst with Python and SQL experience.",
+                current_title="Data Analyst",
+                current_skills=("Python", "SQL"),
+            )
+        )
+
+        pivots = [
+            summary
+            for summary in response.summaries
+            if summary.scenario_type == ScenarioType.SAME_ROLE_INDUSTRY_PIVOT
+        ]
+        assert pivots
+        assert pivots[0].change.source_industry == "technology/data_and_ai"
+        assert pivots[0].change.target_industry == "financial_services/banking"
+
+    def test_engine_generates_adjacent_role_industry_pivots_within_distance_limit(self):
+        pool = CareerDeltaCandidatePool(
+            candidates=(
+                _candidate(
+                    uuid="1",
+                    title="Data Scientist",
+                    title_family="data-scientist",
+                    industry_key="financial_services/insurance",
+                    industry_label="financial_services / insurance",
+                    overall_fit=0.69,
+                ),
+                _candidate(
+                    uuid="2",
+                    title="Data Scientist",
+                    title_family="data-scientist",
+                    industry_key="financial_services/insurance",
+                    industry_label="financial_services / insurance",
+                    overall_fit=0.67,
+                ),
+            ),
+            extracted_skills=("Excel", "SQL"),
+            total_candidates=18,
+        )
+        dependencies = CareerDeltaDependencies(
+            taxonomy=_TaxonomyStub(),
+            market_stats=_MarketStatsStub(
+                industries={
+                    "financial_services/banking": MarketAggregate(
+                        key="financial_services/banking",
+                        label="financial_services / banking",
+                        kind="industry",
+                        job_count=22,
+                        median_salary_annual=115000,
+                        momentum=0.02,
+                    ),
+                    "financial_services/insurance": MarketAggregate(
+                        key="financial_services/insurance",
+                        label="financial_services / insurance",
+                        kind="industry",
+                        job_count=35,
+                        median_salary_annual=135000,
+                        momentum=0.09,
+                    ),
+                },
+                snapshot={
+                    "current_industry": MarketAggregate(
+                        key="financial_services/banking",
+                        label="financial_services / banking",
+                        kind="industry",
+                        job_count=22,
+                        median_salary_annual=115000,
+                        momentum=0.02,
+                    ),
+                    "current_title_family": MarketAggregate(
+                        key="data-analyst",
+                        label="data-analyst",
+                        kind="title_family",
+                        job_count=15,
+                    ),
+                },
+            ),
+            search_scoring=_SearchScoringStub(pool=pool),
+        )
+
+        response = CareerDeltaEngine(dependencies).analyze(
+            CareerDeltaRequest(
+                profile_text="Data analyst with Excel and SQL experience.",
+                current_title="Data Analyst",
+                current_skills=("Excel", "SQL"),
+            )
+        )
+
+        pivots = [
+            summary
+            for summary in response.summaries
+            if summary.scenario_type == ScenarioType.ADJACENT_ROLE_INDUSTRY_PIVOT
+        ]
+        assert pivots
+        assert pivots[0].target_title == "Data Scientist"
+        assert pivots[0].change.target_industry == "financial_services/insurance"
+
+    def test_engine_filters_adjacent_role_industry_pivots_that_are_too_far(self):
+        pool = CareerDeltaCandidatePool(
+            candidates=(
+                _candidate(
+                    uuid="1",
+                    title="Data Scientist",
+                    title_family="data-scientist",
+                    industry_key="healthcare/clinical_and_care_delivery",
+                    industry_label="healthcare / clinical_and_care_delivery",
+                    overall_fit=0.69,
+                ),
+                _candidate(
+                    uuid="2",
+                    title="Data Scientist",
+                    title_family="data-scientist",
+                    industry_key="healthcare/clinical_and_care_delivery",
+                    industry_label="healthcare / clinical_and_care_delivery",
+                    overall_fit=0.68,
+                ),
+            ),
+            extracted_skills=("Python", "SQL"),
+            total_candidates=18,
+        )
+        dependencies = CareerDeltaDependencies(
+            taxonomy=_TaxonomyStub(),
+            market_stats=_MarketStatsStub(
+                industries={
+                    "technology/data_and_ai": MarketAggregate(
+                        key="technology/data_and_ai",
+                        label="technology / data_and_ai",
+                        kind="industry",
+                        job_count=25,
+                        median_salary_annual=120000,
+                        momentum=0.03,
+                    ),
+                    "healthcare/clinical_and_care_delivery": MarketAggregate(
+                        key="healthcare/clinical_and_care_delivery",
+                        label="healthcare / clinical_and_care_delivery",
+                        kind="industry",
+                        job_count=30,
+                        median_salary_annual=150000,
+                        momentum=0.11,
+                    ),
+                },
+                snapshot={
+                    "current_industry": MarketAggregate(
+                        key="technology/data_and_ai",
+                        label="technology / data_and_ai",
+                        kind="industry",
+                        job_count=25,
+                        median_salary_annual=120000,
+                        momentum=0.03,
+                    ),
+                    "current_title_family": MarketAggregate(
+                        key="data-analyst",
+                        label="data-analyst",
+                        kind="title_family",
+                        job_count=20,
+                    ),
+                },
+            ),
+            search_scoring=_SearchScoringStub(pool=pool),
+        )
+
+        response = CareerDeltaEngine(dependencies).analyze(
+            CareerDeltaRequest(
+                profile_text="Data analyst with Python and SQL experience.",
+                current_title="Data Analyst",
+                current_skills=("Python", "SQL"),
+            )
+        )
+
+        assert response.filtered_scenarios
+        assert response.filtered_scenarios[0].scenario_type == ScenarioType.ADJACENT_ROLE_INDUSTRY_PIVOT
+        assert response.filtered_scenarios[0].reason_code == "industry_distance_too_high"
 
     def test_filtered_scenario_uses_stable_id_helper(self):
         filtered = build_filtered_scenario(

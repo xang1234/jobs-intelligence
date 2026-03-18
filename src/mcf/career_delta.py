@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, Protocol
 
+from .industry_taxonomy import IndustryClassification, industry_distance, is_adjacent_role, normalize_title_family
+
 SCENARIO_ID_VERSION = "cd1"
 _SCENARIO_PART_RE = re.compile(r"[^a-z0-9]+")
 
@@ -41,6 +43,9 @@ class ScenarioType(str, Enum):
     SAME_ROLE = "same_role"
     ADJACENT_ROLE = "adjacent_role"
     INDUSTRY_PIVOT = "industry_pivot"
+    TITLE_PIVOT = "title_pivot"
+    SAME_ROLE_INDUSTRY_PIVOT = "same_role_industry_pivot"
+    ADJACENT_ROLE_INDUSTRY_PIVOT = "adjacent_role_industry_pivot"
     SKILL_ADDITION = "skill_addition"
     SKILL_SUBSTITUTION = "skill_substitution"
     FILTERED_OUT = "filtered_out"
@@ -116,11 +121,15 @@ class SkillReplacement:
 
 @dataclass(frozen=True)
 class ScenarioChange:
-    """Structured skill change payload for generated scenarios."""
+    """Structured change payload for generated scenarios."""
 
     added_skills: tuple[str, ...] = ()
     removed_skills: tuple[str, ...] = ()
     replaced_skills: tuple[SkillReplacement, ...] = ()
+    source_title_family: Optional[str] = None
+    target_title_family: Optional[str] = None
+    source_industry: Optional[str] = None
+    target_industry: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -136,6 +145,26 @@ class SkillScenarioSignal:
     salary_lift_pct: Optional[float] = None
     similarity: Optional[float] = None
     same_cluster: Optional[bool] = None
+
+
+@dataclass(frozen=True)
+class PivotScenarioSignal:
+    """Structured title/industry evidence behind pivot scenarios."""
+
+    supporting_jobs: int
+    supporting_share_pct: float
+    target_title_family: str
+    target_industry: str
+    title_distance: str
+    industry_distance: Optional[int]
+    fit_median: float
+    market_job_count: int
+    market_salary_annual_median: Optional[int] = None
+    market_momentum: Optional[float] = None
+    salary_lift_pct: Optional[float] = None
+
+
+ScenarioSignal = SkillScenarioSignal | PivotScenarioSignal
 
 
 @dataclass(frozen=True)
@@ -217,7 +246,7 @@ class ScenarioSummary:
     market_position: MarketPosition
     confidence: ScenarioConfidence
     change: Optional[ScenarioChange] = None
-    signals: tuple[SkillScenarioSignal, ...] = ()
+    signals: tuple[ScenarioSignal, ...] = ()
     target_title: Optional[str] = None
     target_sector: Optional[str] = None
     thin_market: bool = False
@@ -242,7 +271,7 @@ class ScenarioDetail:
     confidence: ScenarioConfidence
     summary: Optional[ScenarioSummary] = None
     change: Optional[ScenarioChange] = None
-    signals: tuple[SkillScenarioSignal, ...] = ()
+    signals: tuple[ScenarioSignal, ...] = ()
     target_title: Optional[str] = None
     target_sector: Optional[str] = None
     evidence: tuple[str, ...] = ()
@@ -290,6 +319,8 @@ class MarketStatsProvider(Protocol):
 
     def get_market_snapshot(self, request: CareerDeltaRequest) -> dict: ...
     def get_skill_stats(self, skill: str): ...
+    def get_title_family_stats(self, title_or_family: str): ...
+    def get_industry_stats(self, industry: str): ...
 
 
 class SearchScoringProvider(Protocol):
@@ -375,13 +406,21 @@ class CareerDeltaEngine:
             market_stats=self.dependencies.market_stats,
             search_scoring=self.dependencies.search_scoring,
         )
+        pivot_summaries, filtered_scenarios = generate_pivot_scenarios(
+            normalized_request,
+            candidate_pool,
+            baseline,
+            market_snapshot=market_snapshot,
+            market_stats=self.dependencies.market_stats,
+        )
+        all_summaries = _rank_summaries(summaries + pivot_summaries)
 
         return CareerDeltaResponse(
             request=normalized_request,
             baseline=baseline,
             candidate_pool=candidate_pool,
-            summaries=summaries,
-            filtered_scenarios=(),
+            summaries=all_summaries,
+            filtered_scenarios=filtered_scenarios if normalized_request.include_filtered else (),
             degraded=bool(candidate_pool.degraded),
             thin_market=baseline.thin_market,
         )
@@ -589,14 +628,24 @@ def _salary_midpoint(low: Optional[int], high: Optional[int]) -> Optional[int]:
 
 MAX_SKILL_ADDITION_SCENARIOS = 3
 MAX_SKILL_SUBSTITUTION_SCENARIOS = 3
+MAX_TITLE_PIVOT_SCENARIOS = 2
+MAX_SAME_ROLE_INDUSTRY_PIVOT_SCENARIOS = 2
+MAX_ADJACENT_ROLE_INDUSTRY_PIVOT_SCENARIOS = 2
 RELATED_SKILL_LIMIT = 6
 REACHABLE_FIT_THRESHOLD = 0.55
 MIN_SKILL_SUPPORTING_JOBS = 2
 MIN_SKILL_SUPPORT_SHARE = 0.18
+MIN_PIVOT_SUPPORTING_JOBS = 2
+MIN_PIVOT_SUPPORT_SHARE = 0.18
 MIN_SUBSTITUTION_SIMILARITY = 0.72
 MIN_SUBSTITUTION_JOB_COUNT_RATIO = 1.25
 MIN_SUBSTITUTION_MOMENTUM_DELTA = 0.05
 MIN_SUBSTITUTION_SALARY_LIFT_PCT = 0.08
+MIN_TITLE_PIVOT_FIT = 0.58
+MIN_INDUSTRY_PIVOT_FIT = 0.55
+MIN_TITLE_MARKET_IMPROVEMENT = 0.03
+MIN_INDUSTRY_MARKET_IMPROVEMENT = 0.03
+MAX_ADJACENT_INDUSTRY_DISTANCE = 1
 
 
 def generate_skill_scenarios(
@@ -853,6 +902,481 @@ def _generate_skill_substitution_scenarios(
     return [summary for _, summary in deduped[:MAX_SKILL_SUBSTITUTION_SCENARIOS]]
 
 
+def generate_pivot_scenarios(
+    request: CareerDeltaRequest,
+    candidate_pool: CareerDeltaCandidatePool,
+    baseline: BaselineMarketPosition,
+    *,
+    market_snapshot: dict,
+    market_stats: MarketStatsProvider,
+) -> tuple[tuple[ScenarioSummary, ...], tuple[FilteredScenario, ...]]:
+    """Generate title and industry pivot scenarios from the shared candidate pool."""
+    analysis_set = _analysis_candidates(candidate_pool)
+    if not analysis_set:
+        return (), ()
+
+    source_title = _resolve_source_title(request, analysis_set)
+    source_title_family = _resolve_source_title_family(request, analysis_set)
+    current_industry_key = getattr(market_snapshot.get("current_industry"), "key", None)
+    current_industry_key = (
+        current_industry_key
+        if current_industry_key and not current_industry_key.startswith("unknown/")
+        else None
+    )
+
+    title_summaries = _generate_title_pivot_scenarios(
+        source_title=source_title,
+        source_title_family=source_title_family,
+        current_industry_key=current_industry_key,
+        analysis_set=analysis_set,
+        baseline=baseline,
+        market_snapshot=market_snapshot,
+        market_stats=market_stats,
+    )
+    same_role_summaries = _generate_same_role_industry_pivots(
+        source_title_family=source_title_family,
+        current_industry_key=current_industry_key,
+        analysis_set=analysis_set,
+        baseline=baseline,
+        market_stats=market_stats,
+    )
+    adjacent_summaries, filtered = _generate_adjacent_role_industry_pivots(
+        source_title=source_title,
+        source_title_family=source_title_family,
+        current_industry_key=current_industry_key,
+        analysis_set=analysis_set,
+        baseline=baseline,
+        market_stats=market_stats,
+    )
+    return (
+        _rank_summaries(tuple(title_summaries + same_role_summaries + adjacent_summaries)),
+        tuple(filtered),
+    )
+
+
+def _generate_title_pivot_scenarios(
+    *,
+    source_title: Optional[str],
+    source_title_family: Optional[str],
+    current_industry_key: Optional[str],
+    analysis_set: list[CareerDeltaCandidate],
+    baseline: BaselineMarketPosition,
+    market_snapshot: dict,
+    market_stats: MarketStatsProvider,
+) -> list[ScenarioSummary]:
+    if not source_title_family:
+        return []
+
+    grouped = _group_candidates(
+        candidate
+        for candidate in analysis_set
+        if candidate.title_family != source_title_family
+        and (current_industry_key is None or candidate.industry_key == current_industry_key)
+    )
+    current_title_market = (
+        market_snapshot.get("current_title_family")
+        or market_stats.get_title_family_stats(source_title_family)
+    )
+    scored: list[tuple[float, ScenarioSummary]] = []
+    for (_, target_title_family, _), group in grouped.items():
+        dominant_title = _dominant_title(group)
+        source_probe = source_title or source_title_family
+        if not dominant_title or not is_adjacent_role(source_probe, dominant_title):
+            continue
+
+        supporting_jobs = len(group)
+        support_share = supporting_jobs / len(analysis_set)
+        if supporting_jobs < MIN_PIVOT_SUPPORTING_JOBS or support_share < MIN_PIVOT_SUPPORT_SHARE:
+            continue
+
+        fit_median = _quantile([candidate.overall_fit for candidate in group], 0.5)
+        if fit_median < MIN_TITLE_PIVOT_FIT:
+            continue
+
+        target_market = market_stats.get_title_family_stats(target_title_family)
+        salary_lift_pct = _salary_lift_pct(
+            target_market.median_salary_annual,
+            baseline.salary_band.median_annual,
+        )
+        if not _has_material_improvement(
+            current_title_market,
+            target_market,
+            salary_lift_pct,
+            threshold=MIN_TITLE_MARKET_IMPROVEMENT,
+        ):
+            continue
+
+        signal = PivotScenarioSignal(
+            supporting_jobs=supporting_jobs,
+            supporting_share_pct=round(support_share * 100, 2),
+            target_title_family=target_title_family,
+            target_industry=current_industry_key or "",
+            title_distance="adjacent",
+            industry_distance=0 if current_industry_key else None,
+            fit_median=fit_median,
+            market_job_count=target_market.job_count,
+            market_salary_annual_median=target_market.median_salary_annual,
+            market_momentum=target_market.momentum,
+            salary_lift_pct=salary_lift_pct,
+        )
+        confidence = ScenarioConfidence(
+            score=_bounded_score(
+                0.35
+                + (_positive_ratio(support_share, 0.5) * 0.2)
+                + (_positive_ratio(fit_median - 0.5, 0.4) * 0.2)
+                + (_positive_ratio(salary_lift_pct, 0.25) * 0.1)
+                + (
+                    _positive_ratio(
+                        _market_delta(target_market.momentum, current_title_market.momentum),
+                        0.2,
+                    )
+                    * 0.15
+                )
+            ),
+            evidence_coverage=round(support_share, 4),
+            market_sample_size=target_market.job_count,
+            reasons=(
+                f"{supporting_jobs} reachable jobs cluster around {dominant_title}.",
+                _format_market_reason(target_market, salary_lift_pct),
+            ),
+        )
+        market_position = _market_position_from_signal(
+            support_share=support_share,
+            momentum=target_market.momentum,
+            salary_lift_pct=salary_lift_pct,
+        )
+        scenario = ScenarioSummary(
+            scenario_id=build_scenario_id(
+                ScenarioType.TITLE_PIVOT,
+                source_title_family=source_title_family,
+                target_title_family=target_title_family,
+                target_sector=current_industry_key,
+                market_position=market_position,
+            ),
+            scenario_type=ScenarioType.TITLE_PIVOT,
+            title=f"Pivot toward {dominant_title}",
+            summary=(
+                f"{dominant_title} appears as a nearby role family in the current market "
+                "without requiring a sector change."
+            ),
+            market_position=market_position,
+            confidence=confidence,
+            change=ScenarioChange(
+                source_title_family=source_title_family,
+                target_title_family=target_title_family,
+                source_industry=current_industry_key,
+                target_industry=current_industry_key,
+            ),
+            signals=(signal,),
+            target_title=dominant_title,
+            target_sector=current_industry_key,
+            thin_market=baseline.thin_market,
+            degraded=baseline.degraded,
+            expected_salary_delta_pct=salary_lift_pct,
+        )
+        scored.append((confidence.score + fit_median + (salary_lift_pct or 0.0), scenario))
+
+    scored.sort(key=lambda item: (item[0], item[1].title), reverse=True)
+    return [summary for _, summary in scored[:MAX_TITLE_PIVOT_SCENARIOS]]
+
+
+def _generate_same_role_industry_pivots(
+    *,
+    source_title_family: Optional[str],
+    current_industry_key: Optional[str],
+    analysis_set: list[CareerDeltaCandidate],
+    baseline: BaselineMarketPosition,
+    market_stats: MarketStatsProvider,
+) -> list[ScenarioSummary]:
+    if not source_title_family or not current_industry_key:
+        return []
+
+    current_industry_market = market_stats.get_industry_stats(current_industry_key)
+    grouped = _group_candidates(
+        candidate
+        for candidate in analysis_set
+        if candidate.title_family == source_title_family
+        and candidate.industry_key != current_industry_key
+        and not candidate.industry_key.startswith("unknown/")
+    )
+    scored: list[tuple[float, ScenarioSummary]] = []
+    for (target_industry_key, _, target_label), group in grouped.items():
+        supporting_jobs = len(group)
+        support_share = supporting_jobs / len(analysis_set)
+        fit_median = _quantile([candidate.overall_fit for candidate in group], 0.5)
+        if (
+            supporting_jobs < MIN_PIVOT_SUPPORTING_JOBS
+            or support_share < MIN_PIVOT_SUPPORT_SHARE
+            or fit_median < MIN_INDUSTRY_PIVOT_FIT
+        ):
+            continue
+
+        target_market = market_stats.get_industry_stats(target_industry_key)
+        salary_lift_pct = _salary_lift_pct(
+            target_market.median_salary_annual,
+            baseline.salary_band.median_annual,
+        )
+        if not _has_material_improvement(
+            current_industry_market,
+            target_market,
+            salary_lift_pct,
+            threshold=MIN_INDUSTRY_MARKET_IMPROVEMENT,
+        ):
+            continue
+
+        distance = industry_distance(
+            _industry_from_key(current_industry_key),
+            _industry_from_key(target_industry_key),
+        )
+        signal = PivotScenarioSignal(
+            supporting_jobs=supporting_jobs,
+            supporting_share_pct=round(support_share * 100, 2),
+            target_title_family=source_title_family,
+            target_industry=target_industry_key,
+            title_distance="same",
+            industry_distance=distance,
+            fit_median=fit_median,
+            market_job_count=target_market.job_count,
+            market_salary_annual_median=target_market.median_salary_annual,
+            market_momentum=target_market.momentum,
+            salary_lift_pct=salary_lift_pct,
+        )
+        confidence = ScenarioConfidence(
+            score=_bounded_score(
+                0.35
+                + (_positive_ratio(support_share, 0.5) * 0.15)
+                + (_positive_ratio(fit_median - 0.5, 0.4) * 0.2)
+                + (_positive_ratio(salary_lift_pct, 0.25) * 0.15)
+                + (
+                    _positive_ratio(
+                        _market_delta(target_market.momentum, current_industry_market.momentum),
+                        0.2,
+                    )
+                    * 0.15
+                )
+            ),
+            evidence_coverage=round(support_share, 4),
+            market_sample_size=target_market.job_count,
+            reasons=(
+                f"{supporting_jobs} reachable jobs keep the same role family in {target_label}.",
+                _format_market_reason(target_market, salary_lift_pct),
+            ),
+        )
+        market_position = _market_position_from_signal(
+            support_share=support_share,
+            momentum=target_market.momentum,
+            salary_lift_pct=salary_lift_pct,
+        )
+        scenario = ScenarioSummary(
+            scenario_id=build_scenario_id(
+                ScenarioType.SAME_ROLE_INDUSTRY_PIVOT,
+                source_title_family=source_title_family,
+                target_title_family=source_title_family,
+                target_sector=target_industry_key,
+                market_position=market_position,
+            ),
+            scenario_type=ScenarioType.SAME_ROLE_INDUSTRY_PIVOT,
+            title=f"Keep the role, pivot into {target_label}",
+            summary="The same role family appears in a stronger industry bucket with grounded reachable demand.",
+            market_position=market_position,
+            confidence=confidence,
+            change=ScenarioChange(
+                source_title_family=source_title_family,
+                target_title_family=source_title_family,
+                source_industry=current_industry_key,
+                target_industry=target_industry_key,
+            ),
+            signals=(signal,),
+            target_sector=target_industry_key,
+            thin_market=baseline.thin_market,
+            degraded=baseline.degraded,
+            expected_salary_delta_pct=salary_lift_pct,
+        )
+        scored.append((confidence.score + fit_median + (salary_lift_pct or 0.0), scenario))
+
+    scored.sort(key=lambda item: (item[0], item[1].title), reverse=True)
+    return [summary for _, summary in scored[:MAX_SAME_ROLE_INDUSTRY_PIVOT_SCENARIOS]]
+
+
+def _generate_adjacent_role_industry_pivots(
+    *,
+    source_title: Optional[str],
+    source_title_family: Optional[str],
+    current_industry_key: Optional[str],
+    analysis_set: list[CareerDeltaCandidate],
+    baseline: BaselineMarketPosition,
+    market_stats: MarketStatsProvider,
+) -> tuple[list[ScenarioSummary], list[FilteredScenario]]:
+    if not source_title_family or not current_industry_key:
+        return [], []
+
+    grouped = _group_candidates(
+        candidate
+        for candidate in analysis_set
+        if candidate.title_family != source_title_family
+        and candidate.industry_key != current_industry_key
+        and not candidate.industry_key.startswith("unknown/")
+    )
+    current_industry_market = market_stats.get_industry_stats(current_industry_key)
+    scored: list[tuple[float, ScenarioSummary]] = []
+    filtered: list[FilteredScenario] = []
+    for (target_industry_key, target_title_family, target_label), group in grouped.items():
+        supporting_jobs = len(group)
+        support_share = supporting_jobs / len(analysis_set)
+        if supporting_jobs < MIN_PIVOT_SUPPORTING_JOBS or support_share < MIN_PIVOT_SUPPORT_SHARE:
+            continue
+
+        dominant_title = _dominant_title(group)
+        source_probe = source_title or source_title_family
+        is_adjacent = bool(dominant_title and is_adjacent_role(source_probe, dominant_title))
+        distance = industry_distance(
+            _industry_from_key(current_industry_key),
+            _industry_from_key(target_industry_key),
+        )
+        confidence = ScenarioConfidence(
+            score=_bounded_score(0.25 + (_positive_ratio(support_share, 0.5) * 0.2)),
+            evidence_coverage=round(support_share, 4),
+            market_sample_size=supporting_jobs,
+            reasons=(f"{supporting_jobs} reachable jobs support this pivot path.",),
+        )
+        if not is_adjacent:
+            filtered.append(
+                build_filtered_scenario(
+                    scenario_type=ScenarioType.ADJACENT_ROLE_INDUSTRY_PIVOT,
+                    reason_code="title_distance_too_high",
+                    explanation=(
+                        f"{dominant_title or target_title_family} is not close enough "
+                        "to the current role family."
+                    ),
+                    confidence=confidence,
+                    source_title_family=source_title_family,
+                    target_title_family=target_title_family,
+                    target_sector=target_industry_key,
+                )
+            )
+            continue
+        if distance > MAX_ADJACENT_INDUSTRY_DISTANCE:
+            filtered.append(
+                build_filtered_scenario(
+                    scenario_type=ScenarioType.ADJACENT_ROLE_INDUSTRY_PIVOT,
+                    reason_code="industry_distance_too_high",
+                    explanation=(
+                        f"{target_label} is too far from the current industry for a "
+                        "low-cost adjacent pivot."
+                    ),
+                    confidence=confidence,
+                    source_title_family=source_title_family,
+                    target_title_family=target_title_family,
+                    target_sector=target_industry_key,
+                )
+            )
+            continue
+
+        fit_median = _quantile([candidate.overall_fit for candidate in group], 0.5)
+        if fit_median < MIN_INDUSTRY_PIVOT_FIT:
+            continue
+
+        target_market = market_stats.get_industry_stats(target_industry_key)
+        salary_lift_pct = _salary_lift_pct(
+            target_market.median_salary_annual,
+            baseline.salary_band.median_annual,
+        )
+        if not _has_material_improvement(
+            current_industry_market,
+            target_market,
+            salary_lift_pct,
+            threshold=MIN_INDUSTRY_MARKET_IMPROVEMENT,
+        ):
+            continue
+
+        signal = PivotScenarioSignal(
+            supporting_jobs=supporting_jobs,
+            supporting_share_pct=round(support_share * 100, 2),
+            target_title_family=target_title_family,
+            target_industry=target_industry_key,
+            title_distance="adjacent",
+            industry_distance=distance,
+            fit_median=fit_median,
+            market_job_count=target_market.job_count,
+            market_salary_annual_median=target_market.median_salary_annual,
+            market_momentum=target_market.momentum,
+            salary_lift_pct=salary_lift_pct,
+        )
+        scenario = ScenarioSummary(
+            scenario_id=build_scenario_id(
+                ScenarioType.ADJACENT_ROLE_INDUSTRY_PIVOT,
+                source_title_family=source_title_family,
+                target_title_family=target_title_family,
+                target_sector=target_industry_key,
+                market_position=_market_position_from_signal(
+                    support_share=support_share,
+                    momentum=target_market.momentum,
+                    salary_lift_pct=salary_lift_pct,
+                ),
+            ),
+            scenario_type=ScenarioType.ADJACENT_ROLE_INDUSTRY_PIVOT,
+            title=f"Move toward {dominant_title} in {target_label}",
+            summary=(
+                f"{dominant_title} appears as a bounded adjacent-role move in a "
+                "stronger nearby industry bucket."
+            ),
+            market_position=_market_position_from_signal(
+                support_share=support_share,
+                momentum=target_market.momentum,
+                salary_lift_pct=salary_lift_pct,
+            ),
+            confidence=ScenarioConfidence(
+                score=_bounded_score(
+                    0.32
+                    + (_positive_ratio(support_share, 0.5) * 0.15)
+                    + (_positive_ratio(fit_median - 0.5, 0.4) * 0.18)
+                    + (_positive_ratio(salary_lift_pct, 0.25) * 0.12)
+                    + (
+                        _positive_ratio(
+                            _market_delta(target_market.momentum, current_industry_market.momentum),
+                            0.2,
+                        )
+                        * 0.13
+                    )
+                ),
+                evidence_coverage=round(support_share, 4),
+                market_sample_size=target_market.job_count,
+                reasons=(
+                    f"{supporting_jobs} reachable jobs support {dominant_title} in {target_label}.",
+                    _format_market_reason(target_market, salary_lift_pct),
+                ),
+            ),
+            change=ScenarioChange(
+                source_title_family=source_title_family,
+                target_title_family=target_title_family,
+                source_industry=current_industry_key,
+                target_industry=target_industry_key,
+            ),
+            signals=(signal,),
+            target_title=dominant_title,
+            target_sector=target_industry_key,
+            thin_market=baseline.thin_market,
+            degraded=baseline.degraded,
+            expected_salary_delta_pct=salary_lift_pct,
+        )
+        scored.append((scenario.confidence.score + fit_median + (salary_lift_pct or 0.0), scenario))
+
+    scored.sort(key=lambda item: (item[0], item[1].title), reverse=True)
+    filtered.sort(key=lambda item: (item.confidence.score, item.scenario_id), reverse=True)
+    return (
+        [summary for _, summary in scored[:MAX_ADJACENT_ROLE_INDUSTRY_PIVOT_SCENARIOS]],
+        filtered[:3],
+    )
+
+
+def _group_candidates(candidates) -> dict[tuple[str, str, str], list[CareerDeltaCandidate]]:
+    grouped: dict[tuple[str, str, str], list[CareerDeltaCandidate]] = {}
+    for candidate in candidates:
+        key = (candidate.industry_key, candidate.title_family, candidate.industry_label)
+        grouped.setdefault(key, []).append(candidate)
+    return grouped
+
+
 def _analysis_candidates(candidate_pool: CareerDeltaCandidatePool) -> list[CareerDeltaCandidate]:
     reachable = [
         candidate for candidate in candidate_pool.candidates if candidate.overall_fit >= REACHABLE_FIT_THRESHOLD
@@ -869,6 +1393,27 @@ def _normalize_skill_inventory(skills: tuple[str, ...]) -> dict[str, str]:
     return normalized
 
 
+def _resolve_source_title(request: CareerDeltaRequest, analysis_set: list[CareerDeltaCandidate]) -> Optional[str]:
+    if request.current_title:
+        return request.current_title
+    if analysis_set:
+        return analysis_set[0].title
+    return request.target_titles[0] if request.target_titles else None
+
+
+def _resolve_source_title_family(
+    request: CareerDeltaRequest,
+    analysis_set: list[CareerDeltaCandidate],
+) -> Optional[str]:
+    if request.current_title:
+        return _normalize_title_family_key(request.current_title)
+    if analysis_set:
+        return analysis_set[0].title_family
+    if request.target_titles:
+        return _normalize_title_family_key(request.target_titles[0])
+    return None
+
+
 def _salary_lift_pct(
     target_salary_annual: Optional[int],
     baseline_salary_annual: Optional[int],
@@ -876,6 +1421,10 @@ def _salary_lift_pct(
     if not target_salary_annual or not baseline_salary_annual or baseline_salary_annual <= 0:
         return None
     return round((target_salary_annual - baseline_salary_annual) / baseline_salary_annual, 4)
+
+
+def _market_delta(target_value: Optional[float], source_value: Optional[float]) -> float:
+    return round((target_value or 0.0) - (source_value or 0.0), 4)
 
 
 def _positive_ratio(value: Optional[float], cap: float) -> float:
@@ -908,6 +1457,54 @@ def _market_position_from_signal(
     if support_share >= 0.2 or (salary_lift_pct or 0.0) >= 0.1:
         return MarketPosition.STRETCH
     return MarketPosition.UNCLEAR
+
+
+def _rank_summaries(summaries: tuple[ScenarioSummary, ...]) -> tuple[ScenarioSummary, ...]:
+    return tuple(
+        sorted(
+            summaries,
+            key=lambda summary: (
+                summary.confidence.score,
+                summary.expected_salary_delta_pct or 0.0,
+                summary.title,
+            ),
+            reverse=True,
+        )
+    )
+
+
+def _dominant_title(candidates: list[CareerDeltaCandidate]) -> Optional[str]:
+    if not candidates:
+        return None
+    counts = Counter(candidate.title for candidate in candidates if candidate.title)
+    if not counts:
+        return None
+    return sorted(counts.items(), key=lambda item: (item[1], item[0]), reverse=True)[0][0]
+
+
+def _normalize_title_family_key(title: str) -> str:
+    return normalize_title_family(title).canonical
+
+
+def _industry_from_key(key: Optional[str]) -> IndustryClassification:
+    if not key or "/" not in key:
+        return IndustryClassification()
+    sector, subsector = key.split("/", 1)
+    return IndustryClassification(sector=sector, subsector=subsector)
+
+
+def _has_material_improvement(
+    current_market,
+    target_market,
+    salary_lift_pct: Optional[float],
+    *,
+    threshold: float,
+) -> bool:
+    if target_market.job_count > current_market.job_count:
+        return True
+    if _market_delta(target_market.momentum, current_market.momentum) >= threshold:
+        return True
+    return (salary_lift_pct or 0.0) >= threshold
 
 
 def _dedupe_substitution_summaries(
