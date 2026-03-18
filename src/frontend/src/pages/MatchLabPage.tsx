@@ -532,7 +532,11 @@ function WhatIfSummaryPanel({
     )
   }
 
-  const resolvedResponse = response as CareerDeltaAnalysisResponse
+  if (!response) {
+    return null
+  }
+
+  const resolvedResponse = response
 
   return (
     <div className="space-y-5">
