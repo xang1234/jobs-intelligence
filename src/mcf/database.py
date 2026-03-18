@@ -22,6 +22,7 @@ from typing import Any, Iterator, Optional
 
 import numpy as np
 
+from .industry_taxonomy import classify_industry, normalize_title_family
 from .models import Job
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     expiry_date DATE,
     applications_count INTEGER,
     job_url TEXT,
+    title_family TEXT,
+    industry_bucket TEXT,
     first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -311,6 +314,7 @@ class MCFDatabase:
 
         # Run migrations for schema changes to existing tables
         self._migrate_salary_annual()
+        self._migrate_normalized_job_metadata()
 
         # FTS5 requires special handling (check if table exists first)
         self._ensure_fts5()
@@ -355,6 +359,66 @@ class MCFDatabase:
                 """)
                 conn.commit()
                 logger.info("Salary annual migration complete")
+
+    def _migrate_normalized_job_metadata(self) -> None:
+        """
+        Add normalized taxonomy columns if they don't exist and backfill safely.
+
+        The migration is additive and idempotent. Unknown values are acceptable
+        when a row cannot be classified conservatively.
+        """
+        with self._connection() as conn:
+            cursor = conn.execute("PRAGMA table_info(jobs)")
+            columns = {row[1] for row in cursor.fetchall()}
+
+            added_columns = False
+            if "title_family" not in columns:
+                conn.execute("ALTER TABLE jobs ADD COLUMN title_family TEXT")
+                added_columns = True
+            if "industry_bucket" not in columns:
+                conn.execute("ALTER TABLE jobs ADD COLUMN industry_bucket TEXT")
+                added_columns = True
+
+            if added_columns:
+                logger.info("Added normalized taxonomy columns to jobs table")
+
+            rows = conn.execute(
+                """
+                SELECT uuid, title, categories, skills
+                FROM jobs
+                WHERE title_family IS NULL OR industry_bucket IS NULL
+                """
+            ).fetchall()
+
+            if not rows:
+                return
+
+            updates = []
+            for row in rows:
+                title_family, industry_bucket = self._derive_normalized_job_metadata(
+                    title=row["title"],
+                    categories=row["categories"],
+                    skills=row["skills"],
+                )
+                updates.append(
+                    {
+                        "uuid": row["uuid"],
+                        "title_family": title_family,
+                        "industry_bucket": industry_bucket,
+                    }
+                )
+
+            conn.executemany(
+                """
+                UPDATE jobs
+                SET title_family = :title_family,
+                    industry_bucket = :industry_bucket
+                WHERE uuid = :uuid
+                """,
+                updates,
+            )
+            conn.commit()
+            logger.info("Normalized job metadata migration complete for %s rows", len(updates))
 
     def _ensure_fts5(self) -> None:
         """
@@ -457,6 +521,11 @@ class MCFDatabase:
             job_data.get("salary_max"),
             job_data.get("salary_type"),
         )
+        data["title_family"], data["industry_bucket"] = self._derive_normalized_job_metadata(
+            title=job_data.get("title"),
+            categories=job_data.get("categories"),
+            skills=job_data.get("skills"),
+        )
 
         conn.execute(
             """
@@ -466,14 +535,14 @@ class MCFDatabase:
                 seniority, min_experience_years, skills, categories,
                 location, district, region, posted_date, expiry_date,
                 applications_count, job_url, first_seen_at, last_updated_at,
-                salary_annual_min, salary_annual_max
+                salary_annual_min, salary_annual_max, title_family, industry_bucket
             ) VALUES (
                 :uuid, :title, :company_name, :company_uen, :description,
                 :salary_min, :salary_max, :salary_type, :employment_type,
                 :seniority, :min_experience_years, :skills, :categories,
                 :location, :district, :region, :posted_date, :expiry_date,
                 :applications_count, :job_url, :first_seen_at, :last_updated_at,
-                :salary_annual_min, :salary_annual_max
+                :salary_annual_min, :salary_annual_max, :title_family, :industry_bucket
             )
             """,
             data,
@@ -487,6 +556,11 @@ class MCFDatabase:
             job_data.get("salary_min"),
             job_data.get("salary_max"),
             job_data.get("salary_type"),
+        )
+        data["title_family"], data["industry_bucket"] = self._derive_normalized_job_metadata(
+            title=job_data.get("title"),
+            categories=job_data.get("categories"),
+            skills=job_data.get("skills"),
         )
 
         conn.execute(
@@ -513,11 +587,37 @@ class MCFDatabase:
                 job_url = :job_url,
                 last_updated_at = :last_updated_at,
                 salary_annual_min = :salary_annual_min,
-                salary_annual_max = :salary_annual_max
+                salary_annual_max = :salary_annual_max,
+                title_family = :title_family,
+                industry_bucket = :industry_bucket
             WHERE uuid = :uuid
             """,
             data,
         )
+
+    @staticmethod
+    def _split_metadata_values(raw_value: str | None) -> list[str]:
+        """Split comma-separated metadata fields into normalized parts."""
+        if not raw_value:
+            return []
+        return [part.strip() for part in raw_value.split(",") if part.strip()]
+
+    @classmethod
+    def _derive_normalized_job_metadata(
+        cls,
+        *,
+        title: str | None,
+        categories: str | None,
+        skills: str | None,
+    ) -> tuple[str, str]:
+        """Derive stable title-family and industry-bucket fields for storage."""
+        title_family = normalize_title_family(title or "").canonical
+        classification = classify_industry(
+            cls._split_metadata_values(categories),
+            skills=cls._split_metadata_values(skills),
+        )
+        industry_bucket = f"{classification.sector}/{classification.subsector}"
+        return title_family, industry_bucket
 
     @staticmethod
     def _calculate_annual_salary(

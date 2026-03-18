@@ -9,13 +9,14 @@ These tests verify database operations including:
 - Session management
 """
 
+import sqlite3
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 from src.mcf.database import MCFDatabase
-from src.mcf.models import Job
+from src.mcf.models import Category, Job
 
 from .factories import generate_test_job
 
@@ -59,6 +60,13 @@ class TestDatabaseCreation:
 
         assert expected_tables.issubset(table_names)
 
+    def test_jobs_schema_includes_normalized_taxonomy_columns(self, empty_db: MCFDatabase):
+        """Fresh databases should include persisted taxonomy columns."""
+        with empty_db._connection() as conn:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+
+        assert {"title_family", "industry_bucket"}.issubset(columns)
+
     def test_can_skip_schema_initialization(self, temp_dir: Path, monkeypatch: pytest.MonkeyPatch):
         """Existing DB handles can be opened without running schema setup."""
         db_path = temp_dir / "test.db"
@@ -82,6 +90,68 @@ class TestDatabaseCreation:
         finally:
             conn.rollback()
             conn.close()
+
+    def test_migrates_and_backfills_normalized_taxonomy_columns(self, temp_dir: Path):
+        """Existing databases should gain normalized columns and conservative backfills."""
+        db_path = temp_dir / "legacy.db"
+        conn = sqlite3.connect(str(db_path))
+        try:
+            conn.executescript(
+                """
+                CREATE TABLE jobs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    uuid TEXT UNIQUE NOT NULL,
+                    title TEXT NOT NULL,
+                    company_name TEXT,
+                    company_uen TEXT,
+                    description TEXT,
+                    salary_min INTEGER,
+                    salary_max INTEGER,
+                    salary_type TEXT,
+                    employment_type TEXT,
+                    seniority TEXT,
+                    min_experience_years INTEGER,
+                    skills TEXT,
+                    categories TEXT,
+                    location TEXT,
+                    district TEXT,
+                    region TEXT,
+                    posted_date DATE,
+                    expiry_date DATE,
+                    applications_count INTEGER,
+                    job_url TEXT,
+                    salary_annual_min INTEGER,
+                    salary_annual_max INTEGER,
+                    first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO jobs (
+                    uuid, title, skills, categories, salary_annual_min, salary_annual_max
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "legacy-job",
+                    "Lead Product Manager",
+                    "Python, SQL",
+                    "Information Technology",
+                    120000,
+                    150000,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        migrated = MCFDatabase(str(db_path))
+        row = migrated.get_job("legacy-job")
+
+        assert row is not None
+        assert row["title_family"] == "product-manager"
+        assert row["industry_bucket"] == "technology/software_and_platforms"
 
 
 class TestJobUpsert:
@@ -154,6 +224,36 @@ class TestJobUpsert:
 
         assert len(uuids) == 20  # test_db has 20 jobs
         assert all(isinstance(u, str) for u in uuids)
+
+    def test_upsert_persists_normalized_title_family_and_industry_bucket(self, empty_db: MCFDatabase):
+        """New writes should populate durable normalized metadata columns."""
+        job = generate_test_job(
+            title="Lead Product Manager",
+            skills=["Python", "SQL"],
+        )
+        job.categories = [Category(category="Information Technology", id=1)]
+
+        empty_db.upsert_job(job)
+        stored = empty_db.get_job(job.uuid)
+
+        assert stored is not None
+        assert stored["title_family"] == "product-manager"
+        assert stored["industry_bucket"] == "technology/software_and_platforms"
+
+    def test_upsert_handles_unknown_taxonomy_values_conservatively(self, empty_db: MCFDatabase):
+        """Unclassifiable rows should retain explicit unknown buckets rather than forcing a match."""
+        job = generate_test_job(
+            title="Mystery Wizard",
+            skills=["Obscure Skill"],
+        )
+        job.categories = [Category(category="Totally New Domain", id=1)]
+
+        empty_db.upsert_job(job)
+        stored = empty_db.get_job(job.uuid)
+
+        assert stored is not None
+        assert stored["title_family"] == "mystery-wizard"
+        assert stored["industry_bucket"] == "unknown/unknown"
 
 
 class TestJobSearch:
