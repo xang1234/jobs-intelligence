@@ -611,6 +611,8 @@ def generate_skill_scenarios(
     current_skills = _normalize_skill_inventory(
         tuple(request.current_skills) + tuple(candidate_pool.extracted_skills)
     )
+    if not current_skills:
+        return ()
     analysis_set = _analysis_candidates(candidate_pool)
     if not analysis_set:
         return ()
@@ -661,7 +663,7 @@ def _generate_skill_addition_scenarios(
     scored: list[tuple[float, ScenarioSummary]] = []
     for skill_key, supporting_jobs in support_counts.items():
         support_share = supporting_jobs / total_jobs if total_jobs else 0.0
-        if supporting_jobs < MIN_SKILL_SUPPORTING_JOBS and support_share < MIN_SKILL_SUPPORT_SHARE:
+        if supporting_jobs < MIN_SKILL_SUPPORTING_JOBS or support_share < MIN_SKILL_SUPPORT_SHARE:
             continue
 
         display_skill = display_names[skill_key]

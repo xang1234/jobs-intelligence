@@ -196,6 +196,92 @@ class TestCareerDeltaEngine:
         assert additions[0].signals[0].supporting_jobs == 2
         assert additions[0].signals[0].market_momentum == 0.14
 
+    def test_engine_skips_skill_additions_without_any_profile_skill_baseline(self):
+        pool = CareerDeltaCandidatePool(
+            candidates=(
+                _candidate(
+                    uuid="1",
+                    skills=("Python", "SQL", "Kubernetes"),
+                    gap_skills=("Kubernetes",),
+                ),
+                _candidate(
+                    uuid="2",
+                    title="Platform Engineer",
+                    skills=("Python", "SQL", "Terraform"),
+                    gap_skills=("Terraform",),
+                ),
+            ),
+            total_candidates=12,
+        )
+        dependencies = CareerDeltaDependencies(
+            taxonomy=_TaxonomyStub(),
+            market_stats=_MarketStatsStub(
+                skills={
+                    "Kubernetes": MarketAggregate(
+                        key="kubernetes",
+                        label="Kubernetes",
+                        kind="skill",
+                        job_count=40,
+                        median_salary_annual=210000,
+                        momentum=0.14,
+                    ),
+                    "Terraform": MarketAggregate(
+                        key="terraform",
+                        label="Terraform",
+                        kind="skill",
+                        job_count=30,
+                        median_salary_annual=205000,
+                        momentum=0.1,
+                    ),
+                }
+            ),
+            search_scoring=_SearchScoringStub(pool=pool),
+        )
+
+        response = CareerDeltaEngine(dependencies).analyze(
+            CareerDeltaRequest(profile_text="Vague manager summary.")
+        )
+
+        assert response.summaries == ()
+
+    def test_engine_requires_more_than_one_supporting_job_for_skill_additions(self):
+        pool = CareerDeltaCandidatePool(
+            candidates=(
+                _candidate(
+                    uuid="1",
+                    skills=("Python", "SQL", "Kubernetes"),
+                    gap_skills=("Kubernetes",),
+                ),
+            ),
+            extracted_skills=("Python", "SQL"),
+            total_candidates=1,
+        )
+        dependencies = CareerDeltaDependencies(
+            taxonomy=_TaxonomyStub(),
+            market_stats=_MarketStatsStub(
+                skills={
+                    "Kubernetes": MarketAggregate(
+                        key="kubernetes",
+                        label="Kubernetes",
+                        kind="skill",
+                        job_count=40,
+                        median_salary_annual=210000,
+                        momentum=0.14,
+                    ),
+                }
+            ),
+            search_scoring=_SearchScoringStub(pool=pool),
+        )
+
+        response = CareerDeltaEngine(dependencies).analyze(
+            CareerDeltaRequest(
+                profile_text="Data engineer with Python and SQL experience.",
+                current_skills=("Python", "SQL"),
+            )
+        )
+
+        assert all(summary.scenario_type != ScenarioType.SKILL_ADDITION for summary in response.summaries)
+
     def test_engine_generates_skill_substitution_only_for_adjacent_improving_skills(self):
         pool = CareerDeltaCandidatePool(
             candidates=(
