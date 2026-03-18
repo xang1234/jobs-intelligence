@@ -1,4 +1,5 @@
 from src.mcf.career_delta import (
+    CareerDeltaCandidatePool,
     CareerDeltaDependencies,
     CareerDeltaEngine,
     CareerDeltaRequest,
@@ -8,6 +9,24 @@ from src.mcf.career_delta import (
     build_filtered_scenario,
     build_scenario_id,
 )
+
+
+class _TaxonomyStub:
+    def normalize_title_family(self, title: str):
+        return title
+
+
+class _MarketStatsStub:
+    def get_market_snapshot(self, request):
+        return {"current_industry": None}
+
+
+class _SearchScoringStub:
+    def __init__(self, *, degraded: bool = False):
+        self.degraded = degraded
+
+    def build_candidate_pool(self, request):
+        return CareerDeltaCandidatePool(degraded=self.degraded)
 
 
 class TestScenarioIds:
@@ -68,16 +87,17 @@ class TestCareerDeltaEngine:
 
     def test_engine_is_not_degraded_when_dependencies_are_supplied(self):
         dependencies = CareerDeltaDependencies(
-            taxonomy=object(),
-            market_stats=object(),
-            search_scoring=object(),
+            taxonomy=_TaxonomyStub(),
+            market_stats=_MarketStatsStub(),
+            search_scoring=_SearchScoringStub(),
         )
         engine = CareerDeltaEngine(dependencies)
 
         response = engine.analyze(CareerDeltaRequest(profile_text="Product manager"))
 
         assert response.degraded is False
-        assert response.thin_market is False
+        assert response.baseline is not None
+        assert response.thin_market is True
 
     def test_filtered_scenario_uses_stable_id_helper(self):
         filtered = build_filtered_scenario(

@@ -86,6 +86,85 @@ class ScenarioConfidence:
 
 
 @dataclass(frozen=True)
+class MarketInsight:
+    """Lightweight count/share entry for companies, industries, and skill gaps."""
+
+    name: str
+    job_count: int
+    share_pct: float
+
+
+@dataclass(frozen=True)
+class SalaryBand:
+    """Baseline salary range summary derived from the candidate pool."""
+
+    min_annual: Optional[int] = None
+    median_annual: Optional[int] = None
+    max_annual: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class CareerDeltaCandidate:
+    """Per-job evidence retained for later scenario rescoring and detail payloads."""
+
+    uuid: str
+    title: str
+    company_name: str
+    title_family: str
+    industry_key: str
+    industry_label: str
+    overall_fit: float
+    retrieval_score: float
+    semantic_score: Optional[float] = None
+    bm25_score: Optional[float] = None
+    skill_overlap_score: float = 0.0
+    seniority_fit: Optional[float] = None
+    salary_fit: Optional[float] = None
+    matched_skills: tuple[str, ...] = ()
+    missing_skills: tuple[str, ...] = ()
+    skills: tuple[str, ...] = ()
+    categories: tuple[str, ...] = ()
+    salary_annual_min: Optional[int] = None
+    salary_annual_max: Optional[int] = None
+    employment_type: Optional[str] = None
+    seniority: Optional[str] = None
+    region: Optional[str] = None
+    location: Optional[str] = None
+    posted_date: Optional[str] = None
+    job_url: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class CareerDeltaCandidatePool:
+    """Reusable wide-pool retrieval output for baseline and later scenarios."""
+
+    candidates: tuple[CareerDeltaCandidate, ...] = ()
+    extracted_skills: tuple[str, ...] = ()
+    total_candidates: int = 0
+    degraded: bool = False
+
+
+@dataclass(frozen=True)
+class BaselineMarketPosition:
+    """Current-market baseline derived from the reusable candidate pool."""
+
+    position: MarketPosition
+    reachable_jobs: int
+    total_candidates: int
+    fit_median: float
+    fit_p90: float
+    salary_band: SalaryBand
+    top_industries: tuple[MarketInsight, ...] = ()
+    top_companies: tuple[MarketInsight, ...] = ()
+    extracted_skills: tuple[str, ...] = ()
+    skill_coverage: float = 0.0
+    top_skill_gaps: tuple[MarketInsight, ...] = ()
+    notes: tuple[str, ...] = ()
+    thin_market: bool = False
+    degraded: bool = False
+
+
+@dataclass(frozen=True)
 class ScenarioSummary:
     """
     Lightweight scenario row for list views.
@@ -151,6 +230,8 @@ class CareerDeltaResponse:
     """Orchestrator result contract for summaries, filtered rows, and flags."""
 
     request: CareerDeltaRequest
+    baseline: Optional[BaselineMarketPosition] = None
+    candidate_pool: Optional[CareerDeltaCandidatePool] = None
     summaries: tuple[ScenarioSummary, ...] = ()
     filtered_scenarios: tuple[FilteredScenario, ...] = ()
     degraded: bool = False
@@ -172,7 +253,7 @@ class MarketStatsProvider(Protocol):
 class SearchScoringProvider(Protocol):
     """Provider for wide-pool retrieval and scenario scoring helpers."""
 
-    def score_targets(self, request: CareerDeltaRequest) -> list[dict]: ...
+    def build_candidate_pool(self, request: CareerDeltaRequest) -> CareerDeltaCandidatePool: ...
 
 
 @dataclass
@@ -228,12 +309,31 @@ class CareerDeltaEngine:
             )
         )
 
+        if degraded:
+            return CareerDeltaResponse(
+                request=normalized_request,
+                summaries=(),
+                filtered_scenarios=(),
+                degraded=True,
+                thin_market=False,
+            )
+
+        candidate_pool = self.dependencies.search_scoring.build_candidate_pool(normalized_request)
+        market_snapshot = self.dependencies.market_stats.get_market_snapshot(normalized_request)
+        baseline = summarize_market_position(
+            candidate_pool,
+            market_snapshot=market_snapshot,
+            target_salary_min=normalized_request.target_salary_min,
+        )
+
         return CareerDeltaResponse(
             request=normalized_request,
+            baseline=baseline,
+            candidate_pool=candidate_pool,
             summaries=(),
             filtered_scenarios=(),
-            degraded=degraded,
-            thin_market=False,
+            degraded=bool(candidate_pool.degraded),
+            thin_market=baseline.thin_market,
         )
 
 
@@ -297,3 +397,142 @@ def _normalize_id_part(value: Optional[str]) -> str:
     if not value:
         return ""
     return _SCENARIO_PART_RE.sub("-", value.lower()).strip("-")
+
+
+def summarize_market_position(
+    candidate_pool: CareerDeltaCandidatePool,
+    *,
+    market_snapshot: Optional[dict] = None,
+    target_salary_min: Optional[int] = None,
+) -> BaselineMarketPosition:
+    """Summarize the candidate's current market position from a reusable pool."""
+    candidates = list(candidate_pool.candidates)
+    fits = [candidate.overall_fit for candidate in candidates]
+    reachable = [candidate for candidate in candidates if candidate.overall_fit >= 0.55]
+    analysis_set = reachable or candidates
+
+    reachable_jobs = len(reachable)
+    total_candidates = candidate_pool.total_candidates or len(candidates)
+    fit_median = _quantile(fits, 0.5)
+    fit_p90 = _quantile(fits, 0.9)
+
+    salary_values = [
+        _salary_midpoint(candidate.salary_annual_min, candidate.salary_annual_max)
+        for candidate in analysis_set
+        if _salary_midpoint(candidate.salary_annual_min, candidate.salary_annual_max) is not None
+    ]
+    salary_band = SalaryBand(
+        min_annual=min(salary_values) if salary_values else None,
+        median_annual=_integer_median(salary_values),
+        max_annual=max(salary_values) if salary_values else None,
+    )
+
+    top_industries = _top_insights([candidate.industry_label for candidate in analysis_set])
+    top_companies = _top_insights([candidate.company_name for candidate in analysis_set])
+    top_skill_gaps = _top_insights(
+        gap
+        for candidate in analysis_set[:20]
+        for gap in candidate.missing_skills
+        if gap not in candidate.matched_skills
+    )
+
+    skill_coverage_values = [
+        len(candidate.matched_skills) / len(candidate_pool.extracted_skills)
+        for candidate in analysis_set
+        if candidate_pool.extracted_skills
+    ]
+    skill_coverage = round(sum(skill_coverage_values) / len(skill_coverage_values), 4) if skill_coverage_values else 0.0
+
+    thin_market = total_candidates < 15 or reachable_jobs < 5
+    notes: list[str] = []
+    if thin_market:
+        notes.append(
+            "Baseline evidence is limited, so scenario confidence should be conservative."
+        )
+    if candidate_pool.degraded:
+        notes.append(
+            "Vector retrieval was unavailable, so baseline fit relies on keyword fallback relevance."
+        )
+    if (
+        target_salary_min is not None
+        and salary_band.median_annual is not None
+        and salary_band.median_annual < target_salary_min
+    ):
+        notes.append("Typical reachable salary is below the requested target band.")
+    if market_snapshot and market_snapshot.get("current_industry") is not None:
+        current_industry = market_snapshot["current_industry"]
+        if getattr(current_industry, "key", "").startswith("unknown/"):
+            notes.append("Current industry baseline is uncertain because source evidence is incomplete.")
+
+    if total_candidates == 0:
+        position = MarketPosition.THIN
+    elif thin_market:
+        position = MarketPosition.THIN
+    elif fit_median >= 0.72 and reachable_jobs >= 12:
+        position = MarketPosition.LEADING
+    elif fit_median >= 0.58 and reachable_jobs >= 6:
+        position = MarketPosition.COMPETITIVE
+    elif reachable_jobs >= 2 or fit_median >= 0.4:
+        position = MarketPosition.STRETCH
+    else:
+        position = MarketPosition.UNCLEAR
+
+    return BaselineMarketPosition(
+        position=position,
+        reachable_jobs=reachable_jobs,
+        total_candidates=total_candidates,
+        fit_median=fit_median,
+        fit_p90=fit_p90,
+        salary_band=salary_band,
+        top_industries=top_industries,
+        top_companies=top_companies,
+        extracted_skills=candidate_pool.extracted_skills,
+        skill_coverage=skill_coverage,
+        top_skill_gaps=top_skill_gaps,
+        notes=tuple(notes),
+        thin_market=thin_market,
+        degraded=candidate_pool.degraded,
+    )
+
+
+def _top_insights(names) -> tuple[MarketInsight, ...]:
+    counts: dict[str, int] = {}
+    total = 0
+    for name in names:
+        if not name:
+            continue
+        counts[name] = counts.get(name, 0) + 1
+        total += 1
+    if total == 0:
+        return ()
+    ranked = sorted(counts.items(), key=lambda item: (item[1], item[0]), reverse=True)[:5]
+    return tuple(
+        MarketInsight(name=name, job_count=count, share_pct=round((count / total) * 100, 2))
+        for name, count in ranked
+    )
+
+
+def _integer_median(values: list[int]) -> Optional[int]:
+    if not values:
+        return None
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    if len(ordered) % 2 == 1:
+        return ordered[mid]
+    return int((ordered[mid - 1] + ordered[mid]) / 2)
+
+
+def _quantile(values: list[float], quantile: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    index = int(round((len(ordered) - 1) * quantile))
+    return round(float(ordered[index]), 4)
+
+
+def _salary_midpoint(low: Optional[int], high: Optional[int]) -> Optional[int]:
+    if low is not None and high is not None:
+        return int((low + high) / 2)
+    if low is not None:
+        return low
+    return high

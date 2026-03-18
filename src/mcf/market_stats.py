@@ -17,7 +17,12 @@ from typing import Callable, Optional
 
 from .career_delta import CareerDeltaRequest
 from .database import MCFDatabase
-from .industry_taxonomy import IndustryClassification, classify_industry, normalize_title_family
+from .industry_taxonomy import (
+    IndustryClassification,
+    classify_industry,
+    infer_company_dominant_industry,
+    normalize_title_family,
+)
 
 NO_RECENT_JOBS = "no_recent_jobs"
 SPARSE_SALARY_DATA = "sparse_salary_data"
@@ -49,6 +54,7 @@ class MarketStatsSnapshot:
     skills: dict[str, MarketAggregate]
     title_families: dict[str, MarketAggregate]
     industries: dict[str, MarketAggregate]
+    company_industries: dict[str, IndustryClassification]
 
 
 class MarketStatsCache:
@@ -112,7 +118,14 @@ class MarketStatsCache:
 
         current_title = request.current_title or ""
         target_titles = request.normalized_target_titles()
-        current_industry = classify_industry(request.current_categories, skills=request.current_skills)
+        company_industry = snapshot.company_industries.get((request.current_company or "").strip())
+        if company_industry and not company_industry.is_unknown:
+            current_industry = company_industry
+        else:
+            current_industry = classify_industry(
+                request.current_categories,
+                skills=request.current_skills,
+            )
 
         return {
             "refreshed_at_epoch": snapshot.refreshed_at_epoch,
@@ -140,12 +153,18 @@ class MarketStatsCache:
         industry_salarys: dict[str, dict[str, list[int]]] = defaultdict(lambda: {label: [] for label in labels})
         industry_labels: dict[str, str] = {}
         company_direct_industries: dict[str, list[IndustryClassification]] = defaultdict(list)
+        company_industries: dict[str, IndustryClassification] = {}
 
         for row in rows:
             company_name = (row["company_name"] or "").strip()
             direct = classify_industry(self._split_csv(row["categories"]))
             if company_name and not direct.is_unknown:
                 company_direct_industries[company_name].append(direct)
+
+        for company_name, classifications in company_direct_industries.items():
+            inferred = infer_company_dominant_industry(classifications)
+            if inferred is not None:
+                company_industries[company_name] = inferred
 
         for row in rows:
             month = row["posted_date"][:7]
@@ -212,6 +231,7 @@ class MarketStatsCache:
                 )
                 for key, counts in industry_counts.items()
             },
+            company_industries=company_industries,
         )
         return snapshot
 
