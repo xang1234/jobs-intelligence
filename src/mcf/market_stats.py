@@ -119,11 +119,13 @@ class MarketStatsCache:
         current_title = request.current_title or ""
         target_titles = request.normalized_target_titles()
         company_industry = snapshot.company_industries.get((request.current_company or "").strip())
-        if company_industry and not company_industry.is_unknown:
+        direct_industry = classify_industry(request.current_categories)
+        if not direct_industry.is_unknown:
+            current_industry = direct_industry
+        elif company_industry and not company_industry.is_unknown:
             current_industry = company_industry
         else:
             current_industry = classify_industry(
-                request.current_categories,
                 skills=request.current_skills,
             )
 

@@ -80,6 +80,49 @@ def test_provider_builds_reusable_candidate_pool(temp_dir, empty_db):
     assert pool.candidates[0].industry_key.startswith("technology/")
 
 
+def test_provider_keeps_pool_broad_even_with_target_titles(temp_dir, empty_db):
+    _insert_job(
+        empty_db,
+        title="Senior Data Scientist",
+        company_name="Insight Labs",
+        skills=["Python", "SQL", "Machine Learning"],
+        categories=["Data Science"],
+        posted_days_ago=2,
+        salary_min=12000,
+        salary_max=16000,
+    )
+    _insert_job(
+        empty_db,
+        title="Analytics Engineer",
+        company_name="Insight Labs",
+        skills=["Python", "SQL", "Machine Learning"],
+        categories=["Information Technology"],
+        posted_days_ago=1,
+        salary_min=11000,
+        salary_max=15000,
+    )
+
+    engine = SemanticSearchEngine(
+        db_path=str(empty_db.db_path),
+        index_dir=temp_dir / "missing-indexes",
+    )
+    provider = SearchEngineCareerDeltaProvider(engine, minimum_pool_size=10)
+
+    pool = provider.build_candidate_pool(
+        CareerDeltaRequest(
+            profile_text="Senior analytics leader with Python, SQL, machine learning experience.",
+            target_titles=("Data Scientist",),
+            limit=5,
+        )
+    )
+
+    titles = {candidate.title: candidate.target_title_match for candidate in pool.candidates}
+    assert "Senior Data Scientist" in titles
+    assert "Analytics Engineer" in titles
+    assert titles["Senior Data Scientist"] is True
+    assert titles["Analytics Engineer"] is False
+
+
 def test_engine_produces_baseline_from_candidate_pool(temp_dir, empty_db):
     for idx in range(6):
         _insert_job(
@@ -148,3 +191,28 @@ def test_market_snapshot_uses_current_company_for_industry_fallback(temp_dir, em
     )
 
     assert snapshot["current_industry"].key == "technology/software_and_platforms"
+
+
+def test_market_snapshot_prefers_explicit_categories_over_company_fallback(temp_dir, empty_db):
+    for title in ("Platform Engineer", "Data Engineer", "Backend Engineer"):
+        _insert_job(
+            empty_db,
+            title=title,
+            company_name="Alpha",
+            skills=["Python", "SQL"],
+            categories=["Information Technology"],
+            posted_days_ago=2,
+            salary_min=9000,
+            salary_max=12000,
+        )
+
+    cache = MarketStatsCache(empty_db, months=3)
+    snapshot = cache.get_market_snapshot(
+        CareerDeltaRequest(
+            profile_text="Engineer profile",
+            current_company="Alpha",
+            current_categories=("Marketing",),
+        )
+    )
+
+    assert snapshot["current_industry"].key == "commercial/marketing_and_brand"

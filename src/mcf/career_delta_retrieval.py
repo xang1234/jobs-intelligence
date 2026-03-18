@@ -65,8 +65,11 @@ class SearchEngineCareerDeltaProvider:
                 continue
             if request.location and job.get("region") != request.location:
                 continue
-            if normalized_titles and not any(title in (job.get("title", "").lower()) for title in normalized_titles):
-                continue
+
+            title_match = bool(
+                normalized_titles
+                and any(title in (job.get("title", "").lower()) for title in normalized_titles)
+            )
 
             job_skills = tuple(self.engine._parse_skills(job.get("skills")))
             matched_skills = tuple(sorted(set(extracted_skills).intersection(job_skills)))
@@ -111,6 +114,7 @@ class SearchEngineCareerDeltaProvider:
                     title=job.get("title", ""),
                     company_name=company_name,
                     title_family=normalize_title_family(job.get("title", "")).canonical,
+                    target_title_match=title_match,
                     industry_key=f"{industry.sector}/{industry.subsector}",
                     industry_label=f"{industry.sector} / {industry.subsector}",
                     overall_fit=round(float(overall_fit), 4),

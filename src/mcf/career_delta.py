@@ -115,6 +115,7 @@ class CareerDeltaCandidate:
     industry_label: str
     overall_fit: float
     retrieval_score: float
+    target_title_match: bool = False
     semantic_score: Optional[float] = None
     bm25_score: Optional[float] = None
     skill_overlap_score: float = 0.0
