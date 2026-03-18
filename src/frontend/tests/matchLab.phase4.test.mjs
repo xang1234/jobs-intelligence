@@ -205,7 +205,7 @@ async function waitForServer(url, timeoutMs = 15000) {
 
 function startDevServer() {
   return spawn(
-    '/Users/admin/.nvm/versions/node/v22.18.0/bin/node',
+    process.execPath,
     ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', '4174', '--strictPort'],
     {
       cwd: frontendDir,
@@ -215,8 +215,20 @@ function startDevServer() {
   )
 }
 
+async function launchBrowser() {
+  try {
+    return await chromium.launch()
+  } catch (error) {
+    try {
+      return await chromium.launch({ channel: 'chrome' })
+    } catch {
+      throw error
+    }
+  }
+}
+
 async function withPage(setupRoutes, runAssertions) {
-  const browser = await chromium.launch({ channel: 'chrome' })
+  const browser = await launchBrowser()
   const context = await browser.newContext()
   const page = await context.newPage()
   try {
