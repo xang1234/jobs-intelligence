@@ -977,6 +977,81 @@ class TestScenarioRanking:
         assert ranked[0].scenario_id == "skill_addition:a"
         assert filtered[0].reason_code == "duplicate_scenario"
 
+    def test_ranker_prunes_cross_type_semantic_duplicates(self):
+        baseline = BaselineMarketPosition(
+            position=MarketPosition.COMPETITIVE,
+            reachable_jobs=12,
+            total_candidates=20,
+            fit_median=0.6,
+            fit_p90=0.75,
+            salary_band=SalaryBand(median_annual=120000),
+        )
+        shared_change = ScenarioChange(
+            added_skills=("Kubernetes",),
+            source_title_family="data-engineer",
+            target_title_family="platform-engineer",
+        )
+        skill_summary = ScenarioSummary(
+            scenario_id="skill_addition:a",
+            scenario_type=ScenarioType.SKILL_ADDITION,
+            title="Add Kubernetes",
+            summary="Add Kubernetes to move toward platform engineering.",
+            market_position=MarketPosition.COMPETITIVE,
+            confidence=ScenarioConfidence(score=0.82, evidence_coverage=0.62, market_sample_size=24),
+            change=shared_change,
+            signals=(
+                SkillScenarioSignal(
+                    skill="Kubernetes",
+                    supporting_jobs=4,
+                    supporting_share_pct=40.0,
+                    market_job_count=32,
+                    market_momentum=0.14,
+                    salary_lift_pct=0.1,
+                ),
+            ),
+            expected_salary_delta_pct=0.1,
+        )
+        pivot_summary = ScenarioSummary(
+            scenario_id="title_pivot:a",
+            scenario_type=ScenarioType.TITLE_PIVOT,
+            title="Pivot toward Platform Engineer",
+            summary="Use Kubernetes strength to pivot toward platform engineering.",
+            market_position=MarketPosition.STRETCH,
+            confidence=ScenarioConfidence(score=0.74, evidence_coverage=0.48, market_sample_size=22),
+            change=shared_change,
+            signals=(
+                PivotScenarioSignal(
+                    supporting_jobs=4,
+                    supporting_share_pct=40.0,
+                    target_title_family="platform-engineer",
+                    target_industry="technology/platform",
+                    title_distance="adjacent",
+                    industry_distance=0,
+                    fit_median=0.66,
+                    market_job_count=24,
+                    market_momentum=0.11,
+                    salary_lift_pct=0.08,
+                ),
+            ),
+            expected_salary_delta_pct=0.08,
+        )
+
+        ranked, filtered, degraded = rank_and_filter_scenarios(
+            (skill_summary, pivot_summary),
+            baseline=baseline,
+            request=CareerDeltaRequest(profile_text="Profile", limit=5),
+            budget=ComputeBudget(),
+            started_at=0.0,
+            clock=lambda: 0.0,
+        )
+
+        assert degraded is False
+        assert len(ranked) == 1
+        assert ranked[0].scenario_id == "skill_addition:a"
+        assert len(filtered) == 1
+        assert filtered[0].scenario_type is ScenarioType.TITLE_PIVOT
+        assert filtered[0].reason_code == "overlapping_scenario"
+
     def test_ranker_enforces_type_diversity_before_fill(self):
         baseline = BaselineMarketPosition(
             position=MarketPosition.COMPETITIVE,

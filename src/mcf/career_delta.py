@@ -1643,11 +1643,15 @@ def _dedupe_scenarios(
 
     semantic_kept: list[ScenarioSummary] = []
     for summary in exact_kept:
+        overlap_fingerprint = _scenario_overlap_fingerprint(summary)
         matched = next(
             (
                 existing
                 for existing in semantic_kept
-                if _fingerprint_similarity(_scenario_fingerprint(summary), _scenario_fingerprint(existing))
+                if _fingerprint_similarity(
+                    overlap_fingerprint,
+                    _scenario_overlap_fingerprint(existing),
+                )
                 >= SEMANTIC_DEDUP_THRESHOLD
             ),
             None,
@@ -1919,6 +1923,15 @@ def _scenario_fingerprint(summary: ScenarioSummary) -> tuple[str, ...]:
     if change is None:
         return (summary.scenario_type.value, summary.scenario_id)
     parts = [summary.scenario_type.value]
+    parts.extend(_scenario_overlap_fingerprint(summary))
+    return tuple(sorted(parts))
+
+
+def _scenario_overlap_fingerprint(summary: ScenarioSummary) -> tuple[str, ...]:
+    change = summary.change
+    if change is None:
+        return (summary.scenario_id,)
+    parts: list[str] = []
     parts.extend(f"add:{skill.lower()}" for skill in change.added_skills)
     parts.extend(f"remove:{skill.lower()}" for skill in change.removed_skills)
     parts.extend(
