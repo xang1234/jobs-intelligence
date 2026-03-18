@@ -28,6 +28,13 @@ function formatPercent(value: number | null | undefined): string {
   return `${value > 0 ? '+' : ''}${value.toFixed(0)}%`
 }
 
+function formatRatioPercent(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) {
+    return 'n/a'
+  }
+  return `${value > 0 ? '+' : ''}${(value * 100).toFixed(0)}%`
+}
+
 function formatConfidence(score: number): string {
   return `${(score * 100).toFixed(0)}%`
 }
@@ -313,7 +320,7 @@ function WhatIfScenarioPreview({ index, scenario }: { index: number; scenario: C
       <p className="mt-2 text-sm leading-6 text-slate-600">{scenario.summary}</p>
 
       <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <SummaryMetric label="Salary delta" value={formatPercent(scenario.expected_salary_delta_pct)} accent />
+        <SummaryMetric label="Salary delta" value={formatRatioPercent(scenario.expected_salary_delta_pct)} accent />
         <SummaryMetric
           label="Evidence coverage"
           value={`${(scenario.confidence.evidence_coverage * 100).toFixed(0)}%`}
