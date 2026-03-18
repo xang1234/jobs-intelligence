@@ -410,6 +410,26 @@ export interface CareerDeltaScenarioSummary {
   expected_salary_delta_pct: number | null
 }
 
+export interface CareerDeltaScenarioDetail {
+  scenario_id: string
+  scenario_type: CareerDeltaScenarioType
+  title: string
+  narrative: string
+  market_position: CareerDeltaMarketPosition
+  confidence: CareerDeltaConfidence
+  score_breakdown: CareerDeltaScoreBreakdown | null
+  summary: CareerDeltaScenarioSummary | null
+  change: CareerDeltaScenarioChange | null
+  signals: CareerDeltaScenarioSignal[]
+  target_title: string | null
+  target_sector: string | null
+  evidence: string[]
+  missing_skills: string[]
+  search_queries: string[]
+  thin_market: boolean
+  degraded: boolean
+}
+
 export interface CareerDeltaFilteredScenario {
   scenario_id: string
   scenario_type: CareerDeltaScenarioType

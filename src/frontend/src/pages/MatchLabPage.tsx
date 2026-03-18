@@ -1,19 +1,28 @@
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import JobCard from '@/components/JobCard'
-import { analyzeCareerDelta, matchProfile } from '@/services/api'
+import { analyzeCareerDelta, getCareerDeltaScenarioDetail, matchProfile } from '@/services/api'
 import { buildCareerDeltaAnalysisRequest, buildProfileMatchRequest } from '@/services/matchLab'
 import type {
   CareerDeltaAnalysisResponse,
   CareerDeltaBaseline,
   CareerDeltaFilteredScenario,
   CareerDeltaScenarioChange,
+  CareerDeltaScenarioDetail,
   CareerDeltaScenarioSignal,
   CareerDeltaScenarioSummary,
   MatchLabSharedInputs,
 } from '@/types/api'
 
 type MatchLabTab = 'match' | 'what-if'
+
+type AppliedScenarioState = {
+  scenarioId: string
+  title: string
+  previousInputs: MatchLabSharedInputs
+  nextInputs: MatchLabSharedInputs
+  changes: string[]
+}
 
 function tabButtonClass(isActive: boolean): string {
   return isActive
@@ -66,6 +75,33 @@ function compactList(items: string[], emptyLabel: string): string {
   return items.length ? items.join(', ') : emptyLabel
 }
 
+function areSharedInputsEqual(left: MatchLabSharedInputs, right: MatchLabSharedInputs): boolean {
+  return (
+    left.profileText === right.profileText
+    && left.targetTitles === right.targetTitles
+    && left.salaryExpectation === right.salaryExpectation
+    && left.employmentType === right.employmentType
+    && left.region === right.region
+  )
+}
+
+function stripAppliedScenarioSection(profileText: string): string {
+  const marker = '\n\nApplied What If adjustments:\n'
+  const markerIndex = profileText.indexOf(marker)
+  if (markerIndex === -1) {
+    return profileText.trim()
+  }
+  return profileText.slice(0, markerIndex).trim()
+}
+
+function buildAppliedProfileText(profileText: string, changes: string[]): string {
+  const baseProfile = stripAppliedScenarioSection(profileText)
+  if (!changes.length) {
+    return baseProfile
+  }
+  return `${baseProfile}\n\nApplied What If adjustments:\n- ${changes.join('\n- ')}`
+}
+
 function describeScenarioChange(change: CareerDeltaScenarioChange | null): string[] {
   if (!change) {
     return []
@@ -102,6 +138,68 @@ function bestScenarioSignal(signals: CareerDeltaScenarioSignal[]): CareerDeltaSc
     return null
   }
   return [...signals].sort((left, right) => right.supporting_jobs - left.supporting_jobs)[0]
+}
+
+function detailTradeoffs(detail: CareerDeltaScenarioDetail): string[] {
+  const tradeoffs: string[] = []
+  if (detail.missing_skills.length) {
+    tradeoffs.push(`You still need to demonstrate ${compactList(detail.missing_skills, '')}.`)
+  }
+  if (detail.degraded) {
+    tradeoffs.push('This detail came from a degraded retrieval path and may miss supporting evidence.')
+  }
+  if (detail.thin_market) {
+    tradeoffs.push('The reachable pool is thin, so treat this move as directional rather than exhaustive.')
+  }
+  if (detail.change?.removed_skills.length) {
+    tradeoffs.push(`Applying this move de-emphasizes ${compactList(detail.change.removed_skills, '')}.`)
+  }
+  return tradeoffs
+}
+
+function buildAppliedScenarioState(
+  currentInputs: MatchLabSharedInputs,
+  detail: CareerDeltaScenarioDetail,
+): AppliedScenarioState {
+  const changes: string[] = []
+
+  if (detail.target_title) {
+    changes.push(`Target roles shifted toward ${detail.target_title}.`)
+  } else if (detail.change?.target_title_family && detail.change.target_title_family !== detail.change.source_title_family) {
+    changes.push(`Target title family shifted toward ${titleCaseFromKey(detail.change.target_title_family)}.`)
+  }
+
+  if (detail.change?.added_skills.length) {
+    changes.push(`Added skill emphasis: ${compactList(detail.change.added_skills, '')}.`)
+  }
+  if (detail.change?.replaced_skills.length) {
+    changes.push(
+      `Substitution focus: ${detail.change.replaced_skills
+        .map((item) => `${item.from_skill} -> ${item.to_skill}`)
+        .join(', ')}.`,
+    )
+  }
+  if (detail.target_sector) {
+    changes.push(`Sector focus shifted toward ${titleCaseFromKey(detail.target_sector)}.`)
+  }
+
+  if (!changes.length) {
+    changes.push(`Applied scenario: ${detail.title}.`)
+  }
+
+  const nextInputs: MatchLabSharedInputs = {
+    ...currentInputs,
+    profileText: buildAppliedProfileText(currentInputs.profileText, changes),
+    targetTitles: detail.target_title ?? currentInputs.targetTitles,
+  }
+
+  return {
+    scenarioId: detail.scenario_id,
+    title: detail.title,
+    previousInputs: currentInputs,
+    nextInputs,
+    changes,
+  }
 }
 
 function SummaryMetric({
@@ -307,7 +405,29 @@ function BaselineInsightCard({ baseline }: { baseline: CareerDeltaBaseline }) {
   )
 }
 
-function WhatIfScenarioPreview({ index, scenario }: { index: number; scenario: CareerDeltaScenarioSummary }) {
+function WhatIfScenarioPreview({
+  index,
+  scenario,
+  detail,
+  detailLoading,
+  detailError,
+  expanded,
+  applied,
+  onToggleDetail,
+  onRetryDetail,
+  onApplyScenario,
+}: {
+  index: number
+  scenario: CareerDeltaScenarioSummary
+  detail: CareerDeltaScenarioDetail | null
+  detailLoading: boolean
+  detailError: string | null
+  expanded: boolean
+  applied: boolean
+  onToggleDetail: () => void
+  onRetryDetail: () => void
+  onApplyScenario: (detail: CareerDeltaScenarioDetail) => void
+}) {
   const primarySignal = bestScenarioSignal(scenario.signals)
   const changeLines = describeScenarioChange(scenario.change)
 
@@ -444,6 +564,139 @@ function WhatIfScenarioPreview({ index, scenario }: { index: number; scenario: C
           )}
         </div>
       </div>
+
+      <div className="mt-5 flex flex-wrap gap-3">
+        <button
+          type="button"
+          onClick={onToggleDetail}
+          className="rounded-full border border-[color:var(--brand)] px-4 py-2 text-sm font-semibold text-[color:var(--brand)] transition hover:bg-[color:var(--surface)]"
+        >
+          {expanded ? 'Hide detail' : 'Inspect detail'}
+        </button>
+        {detail ? (
+          <button
+            type="button"
+            onClick={() => onApplyScenario(detail)}
+            className="rounded-full bg-[color:var(--brand)] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[color:var(--brand-strong)]"
+          >
+            {applied ? 'Applied to Match Lab' : 'Apply this scenario'}
+          </button>
+        ) : null}
+      </div>
+
+      {expanded ? (
+        <div className="mt-5 rounded-[24px] border border-[color:var(--border)] bg-[color:var(--surface)] px-5 py-5">
+          {detailLoading ? (
+            <div className="space-y-3 animate-pulse">
+              <div className="h-4 w-40 rounded-full bg-slate-200" />
+              <div className="h-5 w-full rounded-full bg-slate-200" />
+              <div className="h-5 w-5/6 rounded-full bg-slate-200" />
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="h-28 rounded-[20px] bg-slate-200" />
+                <div className="h-28 rounded-[20px] bg-slate-200" />
+              </div>
+            </div>
+          ) : detailError ? (
+            <StatePanel
+              eyebrow="Detail unavailable"
+              title="The scenario detail could not be loaded"
+              message={detailError}
+              tone="danger"
+              actionLabel="Retry detail"
+              onAction={onRetryDetail}
+            />
+          ) : detail ? (
+            <div className="space-y-5">
+              <div className="grid gap-4 xl:grid-cols-2">
+                <div className="rounded-[20px] bg-white px-5 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Current angle</p>
+                  <p className="mt-3 text-sm leading-6 text-slate-700">
+                    {detail.change?.source_title_family || detail.change?.source_industry
+                      ? `Current role signal: ${titleCaseFromKey(detail.change?.source_title_family)} in ${titleCaseFromKey(detail.change?.source_industry)}.`
+                      : 'Current baseline is represented by your existing Match Lab inputs and market-position summary.'}
+                  </p>
+                </div>
+                <div className="rounded-[20px] bg-white px-5 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Counterfactual angle</p>
+                  <p className="mt-3 text-sm leading-6 text-slate-700">{detail.narrative}</p>
+                </div>
+              </div>
+
+              <div className="grid gap-4 xl:grid-cols-2">
+                <div className="rounded-[20px] bg-white px-5 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Evidence</p>
+                  <div className="mt-3 space-y-2">
+                    {detail.evidence.length ? (
+                      detail.evidence.map((item) => (
+                        <p key={item} className="rounded-2xl bg-[color:var(--surface)] px-4 py-3 text-sm text-slate-700">
+                          {item}
+                        </p>
+                      ))
+                    ) : (
+                      <p className="text-sm text-slate-500">No extra evidence was attached to this scenario.</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-[20px] bg-white px-5 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Signals and skill gaps</p>
+                  <div className="mt-3 space-y-2">
+                    {detail.signals.map((signal, signalIndex) => (
+                      <p
+                        key={`${detail.scenario_id}-${signalIndex}`}
+                        className="rounded-2xl bg-[color:var(--surface)] px-4 py-3 text-sm text-slate-700"
+                      >
+                        {signal.supporting_jobs} jobs support this move with {signal.supporting_share_pct.toFixed(0)}%
+                        share, fit median {signal.fit_median != null ? `${(signal.fit_median * 100).toFixed(0)}%` : 'n/a'},
+                        and salary {formatCurrency(signal.market_salary_annual_median)}.
+                      </p>
+                    ))}
+                    {detail.missing_skills.length ? (
+                      <p className="rounded-2xl bg-[color:var(--surface)] px-4 py-3 text-sm text-slate-700">
+                        Missing skills to validate: {compactList(detail.missing_skills, '')}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-4 xl:grid-cols-2">
+                <div className="rounded-[20px] bg-white px-5 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Tradeoffs</p>
+                  <div className="mt-3 space-y-2">
+                    {detailTradeoffs(detail).length ? (
+                      detailTradeoffs(detail).map((item) => (
+                        <p key={item} className="rounded-2xl bg-[color:var(--surface)] px-4 py-3 text-sm text-slate-700">
+                          {item}
+                        </p>
+                      ))
+                    ) : (
+                      <p className="rounded-2xl bg-[color:var(--surface)] px-4 py-3 text-sm text-slate-500">
+                        No extra risks were attached beyond the baseline confidence notes.
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-[20px] bg-white px-5 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Suggested search probes</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {detail.search_queries.length ? (
+                      detail.search_queries.map((query) => (
+                        <span key={query} className="rounded-full bg-[color:var(--surface)] px-3 py-1 text-xs font-medium text-slate-700">
+                          {query}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-sm text-slate-500">No extra search probes were generated.</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </article>
   )
 }
@@ -482,11 +735,27 @@ function WhatIfSummaryPanel({
   isPending,
   hasAttempted,
   onRetry,
+  expandedScenarioId,
+  detailByScenarioId,
+  detailErrorByScenarioId,
+  detailLoadingId,
+  appliedScenarioId,
+  onToggleDetail,
+  onRetryDetail,
+  onApplyScenario,
 }: {
   response: CareerDeltaAnalysisResponse | undefined
   isPending: boolean
   hasAttempted: boolean
   onRetry: () => void
+  expandedScenarioId: string | null
+  detailByScenarioId: Record<string, CareerDeltaScenarioDetail>
+  detailErrorByScenarioId: Record<string, string>
+  detailLoadingId: string | null
+  appliedScenarioId: string | null
+  onToggleDetail: (scenarioId: string) => void
+  onRetryDetail: (scenarioId: string) => void
+  onApplyScenario: (detail: CareerDeltaScenarioDetail) => void
 }) {
   const baseline = response?.baseline
   const budgetExhausted = response?.filtered_scenarios.some((item) => item.reason_code === 'budget_exhausted') ?? false
@@ -620,7 +889,19 @@ function WhatIfSummaryPanel({
 
         {resolvedResponse.scenarios.length ? (
           resolvedResponse.scenarios.map((scenario, index) => (
-            <WhatIfScenarioPreview key={scenario.scenario_id} index={index} scenario={scenario} />
+            <WhatIfScenarioPreview
+              key={scenario.scenario_id}
+              index={index}
+              scenario={scenario}
+              detail={detailByScenarioId[scenario.scenario_id] ?? null}
+              detailLoading={detailLoadingId === scenario.scenario_id}
+              detailError={detailErrorByScenarioId[scenario.scenario_id] ?? null}
+              expanded={expandedScenarioId === scenario.scenario_id}
+              applied={appliedScenarioId === scenario.scenario_id}
+              onToggleDetail={() => onToggleDetail(scenario.scenario_id)}
+              onRetryDetail={() => onRetryDetail(scenario.scenario_id)}
+              onApplyScenario={onApplyScenario}
+            />
           ))
         ) : (
           <div className="rounded-[28px] border border-dashed border-[color:var(--border)] bg-white/70 p-10 text-center text-sm text-slate-500">
@@ -648,27 +929,113 @@ export default function MatchLabPage() {
     employmentType: '',
     region: '',
   })
+  const [expandedScenarioId, setExpandedScenarioId] = useState<string | null>(null)
+  const [scenarioDetails, setScenarioDetails] = useState<Record<string, CareerDeltaScenarioDetail>>({})
+  const [detailErrors, setDetailErrors] = useState<Record<string, string>>({})
+  const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null)
+  const [appliedScenario, setAppliedScenario] = useState<AppliedScenarioState | null>(null)
+
+  const updateInputs = (updater: (current: MatchLabSharedInputs) => MatchLabSharedInputs) => {
+    setInputs((current) => {
+      const next = updater(current)
+      if (appliedScenario && !areSharedInputsEqual(next, appliedScenario.nextInputs)) {
+        setAppliedScenario(null)
+      }
+      return next
+    })
+  }
 
   const matchMutation = useMutation({
-    mutationFn: () => matchProfile(buildProfileMatchRequest(inputs)),
+    mutationFn: (nextInputs: MatchLabSharedInputs) => matchProfile(buildProfileMatchRequest(nextInputs)),
   })
 
   const whatIfMutation = useMutation({
-    mutationFn: () => analyzeCareerDelta(buildCareerDeltaAnalysisRequest(inputs)),
+    mutationFn: (nextInputs: MatchLabSharedInputs) => analyzeCareerDelta(buildCareerDeltaAnalysisRequest(nextInputs)),
+  })
+
+  const detailMutation = useMutation({
+    mutationFn: (scenarioId: string) => getCareerDeltaScenarioDetail(scenarioId),
+    onSuccess: (detail) => {
+      setScenarioDetails((current) => ({ ...current, [detail.scenario_id]: detail }))
+      setDetailErrors((current) => {
+        if (!(detail.scenario_id in current)) {
+          return current
+        }
+        const next = { ...current }
+        delete next[detail.scenario_id]
+        return next
+      })
+    },
   })
 
   const inputsReady = inputs.profileText.trim().length >= 20
   const anyPending = matchMutation.isPending || whatIfMutation.isPending
   const whatIfHasAttempted = whatIfMutation.data !== undefined || whatIfMutation.error !== null
 
-  const runCurrentMatch = () => {
+  const runCurrentMatch = (nextInputs = inputs) => {
     setActiveTab('match')
-    matchMutation.mutate()
+    matchMutation.mutate(nextInputs)
   }
 
-  const runWhatIf = () => {
+  const runWhatIf = (nextInputs = inputs) => {
     setActiveTab('what-if')
-    whatIfMutation.mutate()
+    whatIfMutation.mutate(nextInputs)
+  }
+
+  const loadScenarioDetail = async (scenarioId: string) => {
+    if (detailLoadingId === scenarioId) {
+      return
+    }
+
+    setDetailLoadingId(scenarioId)
+    setDetailErrors((current) => {
+      if (!(scenarioId in current)) {
+        return current
+      }
+      const next = { ...current }
+      delete next[scenarioId]
+      return next
+    })
+
+    try {
+      await detailMutation.mutateAsync(scenarioId)
+    } catch (error) {
+      setDetailErrors((current) => ({
+        ...current,
+        [scenarioId]: error instanceof Error ? error.message : 'Scenario detail request failed.',
+      }))
+    } finally {
+      setDetailLoadingId((current) => (current === scenarioId ? null : current))
+    }
+  }
+
+  const toggleScenarioDetail = (scenarioId: string) => {
+    if (expandedScenarioId === scenarioId) {
+      setExpandedScenarioId(null)
+      return
+    }
+    setExpandedScenarioId(scenarioId)
+    void loadScenarioDetail(scenarioId)
+  }
+
+  const retryScenarioDetail = (scenarioId: string) => {
+    setExpandedScenarioId(scenarioId)
+    void loadScenarioDetail(scenarioId)
+  }
+
+  const applyScenario = (detail: CareerDeltaScenarioDetail) => {
+    const applied = buildAppliedScenarioState(inputs, detail)
+    setInputs(applied.nextInputs)
+    setAppliedScenario(applied)
+    runCurrentMatch(applied.nextInputs)
+  }
+
+  const resetAppliedScenario = () => {
+    if (!appliedScenario) {
+      return
+    }
+    setInputs(appliedScenario.previousInputs)
+    setAppliedScenario(null)
   }
 
   return (
@@ -690,18 +1057,45 @@ export default function MatchLabPage() {
             Candidate profile or resume text
             <textarea
               value={inputs.profileText}
-              onChange={(event) => setInputs((current) => ({ ...current, profileText: event.target.value }))}
+              onChange={(event) => updateInputs((current) => ({ ...current, profileText: event.target.value }))}
               rows={12}
               className="mt-3 block w-full rounded-[24px] border border-[color:var(--border)] bg-[color:var(--surface)] px-4 py-4 text-sm leading-6 text-slate-700"
             />
           </label>
+
+          {appliedScenario ? (
+            <div className="mt-5 rounded-[24px] border border-[color:var(--brand)]/30 bg-[color:var(--brand)]/5 px-5 py-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--brand)]">
+                    Applied scenario
+                  </p>
+                  <h3 className="mt-2 text-lg font-semibold text-[color:var(--ink)]">{appliedScenario.title}</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={resetAppliedScenario}
+                  className="rounded-full border border-[color:var(--brand)] px-4 py-2 text-sm font-semibold text-[color:var(--brand)] transition hover:bg-white"
+                >
+                  Revert changes
+                </button>
+              </div>
+              <div className="mt-3 space-y-2">
+                {appliedScenario.changes.map((change) => (
+                  <p key={change} className="rounded-2xl bg-white px-4 py-3 text-sm text-slate-700">
+                    {change}
+                  </p>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           <div className="mt-5 grid gap-4 md:grid-cols-2">
             <label className="text-sm text-slate-600">
               Target titles
               <input
                 value={inputs.targetTitles}
-                onChange={(event) => setInputs((current) => ({ ...current, targetTitles: event.target.value }))}
+                onChange={(event) => updateInputs((current) => ({ ...current, targetTitles: event.target.value }))}
                 placeholder="Data Scientist, ML Engineer"
                 className="mt-1 block w-full rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] px-4 py-3"
               />
@@ -711,7 +1105,7 @@ export default function MatchLabPage() {
               <input
                 value={inputs.salaryExpectation}
                 onChange={(event) =>
-                  setInputs((current) => ({ ...current, salaryExpectation: event.target.value }))
+                  updateInputs((current) => ({ ...current, salaryExpectation: event.target.value }))
                 }
                 type="number"
                 min={0}
@@ -722,7 +1116,7 @@ export default function MatchLabPage() {
               Employment type
               <input
                 value={inputs.employmentType}
-                onChange={(event) => setInputs((current) => ({ ...current, employmentType: event.target.value }))}
+                onChange={(event) => updateInputs((current) => ({ ...current, employmentType: event.target.value }))}
                 placeholder="Full Time"
                 className="mt-1 block w-full rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] px-4 py-3"
               />
@@ -731,7 +1125,7 @@ export default function MatchLabPage() {
               Region
               <input
                 value={inputs.region}
-                onChange={(event) => setInputs((current) => ({ ...current, region: event.target.value }))}
+                onChange={(event) => updateInputs((current) => ({ ...current, region: event.target.value }))}
                 placeholder="Central"
                 className="mt-1 block w-full rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] px-4 py-3"
               />
@@ -741,7 +1135,7 @@ export default function MatchLabPage() {
           <div className="mt-6 flex flex-wrap gap-3">
             <button
               type="button"
-              onClick={runCurrentMatch}
+              onClick={() => runCurrentMatch()}
               disabled={anyPending || !inputsReady}
               className="rounded-full bg-[color:var(--brand)] px-5 py-3 text-sm font-semibold text-white shadow-lg transition hover:bg-[color:var(--brand-strong)] disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -749,7 +1143,7 @@ export default function MatchLabPage() {
             </button>
             <button
               type="button"
-              onClick={runWhatIf}
+              onClick={() => runWhatIf()}
               disabled={anyPending || !inputsReady}
               className="rounded-full border border-[color:var(--brand)] bg-white px-5 py-3 text-sm font-semibold text-[color:var(--brand)] transition hover:bg-[color:var(--surface)] disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -858,7 +1252,7 @@ export default function MatchLabPage() {
                   }
                   tone="danger"
                   actionLabel="Retry analysis"
-                  onAction={runWhatIf}
+                  onAction={() => runWhatIf()}
                 />
               ) : null}
 
@@ -868,6 +1262,14 @@ export default function MatchLabPage() {
                   isPending={whatIfMutation.isPending}
                   hasAttempted={whatIfHasAttempted}
                   onRetry={runWhatIf}
+                  expandedScenarioId={expandedScenarioId}
+                  detailByScenarioId={scenarioDetails}
+                  detailErrorByScenarioId={detailErrors}
+                  detailLoadingId={detailLoadingId}
+                  appliedScenarioId={appliedScenario?.scenarioId ?? null}
+                  onToggleDetail={toggleScenarioDetail}
+                  onRetryDetail={retryScenarioDetail}
+                  onApplyScenario={applyScenario}
                 />
               ) : null}
             </>

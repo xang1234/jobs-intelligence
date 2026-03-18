@@ -2,6 +2,7 @@ import axios from 'axios'
 import type {
   CareerDeltaAnalysisRequest,
   CareerDeltaAnalysisResponse,
+  CareerDeltaScenarioDetail,
   CompanySimilarity,
   CompanySimilarityRequest,
   CompanyTrendResponse,
@@ -124,6 +125,13 @@ export async function matchProfile(req: ProfileMatchRequest): Promise<ProfileMat
 
 export async function analyzeCareerDelta(req: CareerDeltaAnalysisRequest): Promise<CareerDeltaAnalysisResponse> {
   const { data } = await client.post<CareerDeltaAnalysisResponse>('/api/career-delta', req)
+  return data
+}
+
+export async function getCareerDeltaScenarioDetail(scenarioId: string): Promise<CareerDeltaScenarioDetail> {
+  const { data } = await client.get<CareerDeltaScenarioDetail>(
+    `/api/career-delta/${encodeURIComponent(scenarioId)}/detail`,
+  )
   return data
 }
 
