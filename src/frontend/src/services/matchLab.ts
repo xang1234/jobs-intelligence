@@ -40,7 +40,7 @@ export function buildCareerDeltaAnalysisRequest(
 ): CareerDeltaAnalysisRequest {
   return {
     profile_text: inputs.profileText,
-    current_title: options.currentTitle ?? splitCommaSeparated(inputs.targetTitles)[0] ?? null,
+    current_title: options.currentTitle ?? null,
     target_titles: splitCommaSeparated(inputs.targetTitles),
     current_categories: options.currentCategories ?? [],
     current_skills: options.currentSkills ?? [],
