@@ -862,12 +862,14 @@ export default function MatchLabPage() {
                 />
               ) : null}
 
-              <WhatIfSummaryPanel
-                response={whatIfMutation.data}
-                isPending={whatIfMutation.isPending}
-                hasAttempted={whatIfHasAttempted}
-                onRetry={runWhatIf}
-              />
+              {!whatIfMutation.error ? (
+                <WhatIfSummaryPanel
+                  response={whatIfMutation.data}
+                  isPending={whatIfMutation.isPending}
+                  hasAttempted={whatIfHasAttempted}
+                  onRetry={runWhatIf}
+                />
+              ) : null}
             </>
           )}
         </article>
