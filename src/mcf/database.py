@@ -312,12 +312,13 @@ class MCFDatabase:
             # Search analytics table
             conn.executescript(ANALYTICS_SCHEMA)
 
+        # FTS5 must be set up before migrations, because migrations UPDATE
+        # the jobs table and will fire FTS5 triggers if they already exist.
+        self._ensure_fts5()
+
         # Run migrations for schema changes to existing tables
         self._migrate_salary_annual()
         self._migrate_normalized_job_metadata()
-
-        # FTS5 requires special handling (check if table exists first)
-        self._ensure_fts5()
 
         logger.debug(f"Database schema ensured at {self.db_path}")
 
@@ -338,25 +339,36 @@ class MCFDatabase:
                 conn.execute("ALTER TABLE jobs ADD COLUMN salary_annual_min INTEGER")
                 conn.execute("ALTER TABLE jobs ADD COLUMN salary_annual_max INTEGER")
 
-                # Populate for existing rows based on salary_type
-                conn.execute("""
-                    UPDATE jobs SET
-                        salary_annual_min = CASE salary_type
-                            WHEN 'Monthly' THEN salary_min * 12
-                            WHEN 'Yearly' THEN salary_min
-                            WHEN 'Hourly' THEN salary_min * 2080
-                            WHEN 'Daily' THEN salary_min * 260
-                            ELSE salary_min * 12  -- Assume monthly as default
-                        END,
-                        salary_annual_max = CASE salary_type
-                            WHEN 'Monthly' THEN salary_max * 12
-                            WHEN 'Yearly' THEN salary_max
-                            WHEN 'Hourly' THEN salary_max * 2080
-                            WHEN 'Daily' THEN salary_max * 260
-                            ELSE salary_max * 12
+                # Disable FTS trigger during bulk UPDATE (non-FTS columns only)
+                conn.execute("DROP TRIGGER IF EXISTS jobs_au")
+                try:
+                    conn.execute("""
+                        UPDATE jobs SET
+                            salary_annual_min = CASE salary_type
+                                WHEN 'Monthly' THEN salary_min * 12
+                                WHEN 'Yearly' THEN salary_min
+                                WHEN 'Hourly' THEN salary_min * 2080
+                                WHEN 'Daily' THEN salary_min * 260
+                                ELSE salary_min * 12  -- Assume monthly as default
+                            END,
+                            salary_annual_max = CASE salary_type
+                                WHEN 'Monthly' THEN salary_max * 12
+                                WHEN 'Yearly' THEN salary_max
+                                WHEN 'Hourly' THEN salary_max * 2080
+                                WHEN 'Daily' THEN salary_max * 260
+                                ELSE salary_max * 12
+                            END
+                        WHERE salary_min IS NOT NULL OR salary_max IS NOT NULL
+                    """)
+                finally:
+                    conn.execute("""
+                        CREATE TRIGGER IF NOT EXISTS jobs_au AFTER UPDATE ON jobs BEGIN
+                            INSERT INTO jobs_fts(jobs_fts, rowid, uuid, title, description, skills, company_name)
+                            VALUES ('delete', old.id, old.uuid, old.title, old.description, old.skills, old.company_name);
+                            INSERT INTO jobs_fts(rowid, uuid, title, description, skills, company_name)
+                            VALUES (new.id, new.uuid, new.title, new.description, new.skills, new.company_name);
                         END
-                    WHERE salary_min IS NOT NULL OR salary_max IS NOT NULL
-                """)
+                    """)
                 conn.commit()
                 logger.info("Salary annual migration complete")
 
@@ -394,6 +406,8 @@ class MCFDatabase:
         1. They can't be created with IF NOT EXISTS in all cases
         2. Triggers need to be created separately
         3. Existing data needs to be indexed on first setup
+        4. External-content FTS indexes can get out of sync after DB
+           copy/mount, causing IntegrityError in triggers on UPDATE
         """
         with self._connection() as conn:
             # Check if FTS table exists
@@ -406,14 +420,33 @@ class MCFDatabase:
                 logger.info("Creating FTS5 index for jobs...")
                 conn.executescript(FTS5_SCHEMA)
 
-                # Populate FTS5 with existing jobs data
-                jobs_count = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
-                if jobs_count > 0:
-                    logger.info(f"Rebuilding FTS5 index for {jobs_count} jobs...")
+            # Always rebuild to ensure FTS content matches the jobs table.
+            # External-content FTS indexes can silently drift after DB
+            # copy, Docker volume mount, or WAL recovery.
+            jobs_count = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+            if jobs_count > 0:
+                try:
+                    conn.execute("INSERT INTO jobs_fts(jobs_fts) VALUES('rebuild')")
+                except Exception:
+                    logger.warning("FTS5 rebuild failed, dropping and recreating...")
+                    try:
+                        conn.execute("DROP TABLE IF EXISTS jobs_fts")
+                    except sqlite3.DatabaseError:
+                        # FTS internal tables may be malformed — drop them
+                        # individually so the virtual table can be recreated.
+                        for suffix in ("", "_data", "_idx", "_content", "_docsize", "_config"):
+                            try:
+                                conn.execute(f"DROP TABLE IF EXISTS jobs_fts{suffix}")
+                            except Exception:
+                                pass
+                    conn.executescript(FTS5_SCHEMA)
                     conn.execute("INSERT INTO jobs_fts(jobs_fts) VALUES('rebuild')")
 
-                conn.commit()
+            conn.commit()
+            if not fts_exists:
                 logger.info("FTS5 index created")
+            else:
+                logger.debug("FTS5 index verified")
 
     def upsert_job(
         self,
@@ -607,40 +640,57 @@ class MCFDatabase:
         uuid_chunks = [uuids[i : i + chunk_size] for i in range(0, len(uuids), chunk_size)] if uuids else [None]
 
         with self._connection() as conn:
-            for chunk in uuid_chunks:
-                rows, params = self._select_jobs_for_normalized_metadata(
-                    conn,
-                    uuids=chunk,
-                    only_missing=only_missing,
-                )
-                if not rows:
-                    continue
-
-                updates = []
-                for row in rows:
-                    title_family, industry_bucket = self._derive_normalized_job_metadata(
-                        title=row["title"],
-                        categories=row["categories"],
-                        skills=row["skills"],
+            # Temporarily disable FTS triggers during bulk UPDATE.
+            # This migration only touches title_family/industry_bucket
+            # (not FTS-indexed columns), so firing the FTS update trigger
+            # is unnecessary and can fail with IntegrityError when the
+            # FTS index is out of sync (e.g. after Docker volume mount).
+            conn.execute("DROP TRIGGER IF EXISTS jobs_au")
+            try:
+                for chunk in uuid_chunks:
+                    rows, params = self._select_jobs_for_normalized_metadata(
+                        conn,
+                        uuids=chunk,
+                        only_missing=only_missing,
                     )
-                    updates.append(
-                        {
-                            "uuid": row["uuid"],
-                            "title_family": title_family,
-                            "industry_bucket": industry_bucket,
-                        }
-                    )
+                    if not rows:
+                        continue
 
-                conn.executemany(
-                    """
-                    UPDATE jobs
-                    SET title_family = :title_family,
-                        industry_bucket = :industry_bucket
-                    WHERE uuid = :uuid
-                    """,
-                    updates,
-                )
-                total_updated += len(updates)
+                    updates = []
+                    for row in rows:
+                        title_family, industry_bucket = self._derive_normalized_job_metadata(
+                            title=row["title"],
+                            categories=row["categories"],
+                            skills=row["skills"],
+                        )
+                        updates.append(
+                            {
+                                "uuid": row["uuid"],
+                                "title_family": title_family,
+                                "industry_bucket": industry_bucket,
+                            }
+                        )
+
+                    conn.executemany(
+                        """
+                        UPDATE jobs
+                        SET title_family = :title_family,
+                            industry_bucket = :industry_bucket
+                        WHERE uuid = :uuid
+                        """,
+                        updates,
+                    )
+                    total_updated += len(updates)
+            finally:
+                # Restore the FTS update trigger
+                conn.execute("""
+                    CREATE TRIGGER IF NOT EXISTS jobs_au AFTER UPDATE ON jobs BEGIN
+                        INSERT INTO jobs_fts(jobs_fts, rowid, uuid, title, description, skills, company_name)
+                        VALUES ('delete', old.id, old.uuid, old.title, old.description, old.skills, old.company_name);
+                        INSERT INTO jobs_fts(rowid, uuid, title, description, skills, company_name)
+                        VALUES (new.id, new.uuid, new.title, new.description, new.skills, new.company_name);
+                    END
+                """)
 
         return total_updated
 
