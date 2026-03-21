@@ -6,8 +6,14 @@ Handles batch processing, skill clustering, and company multi-centroid generatio
 """
 
 import logging
+import os
 import pickle
 import time
+
+# Suppress OpenMP duplicate library warning on macOS.
+# Both PyTorch (via sentence-transformers) and scikit-learn ship libomp,
+# causing threadpoolctl to warn when both are loaded in the same process.
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 from collections import defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional
