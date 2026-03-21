@@ -15,7 +15,7 @@ WORKDIR /app
 COPY pyproject.toml poetry.lock ./
 
 # Export pinned requirements (without dev deps, without hashes for compat)
-RUN poetry export -f requirements.txt --without-hashes --without dev -o requirements.txt
+RUN poetry export -f requirements.txt --without-hashes --without dev --with ml -o requirements.txt
 
 # Install CPU-only PyTorch first (from dedicated wheel index), then everything else.
 # Two-step install avoids pip pulling the CUDA torch variant (~2GB) via the
@@ -49,8 +49,8 @@ ENV MCF_DB_PATH=/app/data/mcf_jobs.db \
     MCF_INDEX_DIR=/app/data/embeddings \
     MCF_CORS_ORIGINS=* \
     MCF_RATE_LIMIT_RPM=100 \
-    HF_HOME=/app/.cache/huggingface \
-    TRANSFORMERS_CACHE=/app/.cache/huggingface
+    MCF_SQLITE_JOURNAL_MODE=delete \
+    HF_HOME=/app/.cache/huggingface
 
 EXPOSE 8000
 

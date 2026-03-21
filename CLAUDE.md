@@ -372,8 +372,12 @@ python -m src.cli embed-generate --no-build-index
 # Regenerate all embeddings (ignore existing)
 python -m src.cli embed-generate --no-skip-existing
 
+# Only embed jobs posted since a date
+python -m src.cli embed-generate --since 2026-01-01
+
 # Sync new jobs and update indexes incrementally
 python -m src.cli embed-sync
+python -m src.cli embed-sync --since 2026-02-20
 
 # Check embedding and index status
 python -m src.cli embed-status
@@ -387,6 +391,7 @@ python -m src.cli embed-upgrade all-mpnet-base-v2 --yes
 - `--skip-existing/--no-skip-existing` - Skip jobs with embeddings (default: skip)
 - `--build-index/--no-build-index` - Build FAISS indexes after generation (default: build)
 - `--update-index/--no-update-index` - Update FAISS indexes on sync (default: update)
+- `--since` - Only process jobs posted on or after this date (YYYY-MM-DD)
 - `--index-dir` - FAISS index directory (default: `data/embeddings`)
 - `--db` - Database path (default: `data/mcf_jobs.db`)
 

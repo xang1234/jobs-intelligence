@@ -13,6 +13,7 @@ Provides persistent storage with:
 
 import json
 import logging
+import os
 import sqlite3
 from collections import Counter, defaultdict
 from contextlib import contextmanager
@@ -228,11 +229,14 @@ class MCFDatabase:
         jobs = db.search_jobs(company_name="Google")
     """
 
+    _VALID_JOURNAL_MODES = frozenset({"delete", "truncate", "persist", "memory", "wal", "off"})
+
     def __init__(
         self,
         db_path: str = "data/mcf_jobs.db",
         read_only: bool = False,
         ensure_schema: bool = True,
+        journal_mode: str | None = None,
     ):
         """
         Initialize database connection.
@@ -241,10 +245,13 @@ class MCFDatabase:
             db_path: Path to SQLite database file
             read_only: Open the database without schema writes
             ensure_schema: Create tables and run migrations on open
+            journal_mode: Override journal mode (e.g. 'delete' for Docker).
+                Falls back to MCF_SQLITE_JOURNAL_MODE env var.
         """
         self.db_path = Path(db_path)
         self.read_only = read_only
         self.ensure_schema = ensure_schema
+        self._journal_mode = journal_mode
         if not self.read_only:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             if self.ensure_schema:
@@ -259,6 +266,12 @@ class MCFDatabase:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA busy_timeout = 5000")
+        # Disable memory-mapped I/O for database reads.  Docker Desktop's
+        # VirtioFS / gRPC-FUSE does not implement mmap correctly, causing
+        # SIGBUS crashes inside the container.  (Note: WAL's -shm file
+        # uses a separate mmap that this pragma does NOT control —
+        # switching away from WAL mode via _ensure_journal_mode handles that.)
+        conn.execute("PRAGMA mmap_size = 0")
         if self.read_only:
             conn.execute("PRAGMA query_only = ON")
 
@@ -300,8 +313,42 @@ class MCFDatabase:
         finally:
             conn.close()
 
+    def _ensure_journal_mode(self) -> None:
+        """
+        Switch journal mode when requested via constructor arg or env var.
+
+        WAL mode uses a memory-mapped -shm file that crashes with SIGBUS
+        on Docker Desktop's VirtioFS filesystem.  Setting the mode to
+        'delete' checkpoints the WAL and removes the -shm file so the
+        database can be safely bind-mounted into a container.
+
+        The host scraper re-enables WAL via write_optimized=True when it
+        runs, so this is safe to call unconditionally at startup.
+        """
+        target = (
+            self._journal_mode
+            or os.environ.get("MCF_SQLITE_JOURNAL_MODE", "")
+        ).strip().lower()
+        if not target:
+            return
+
+        if target not in self._VALID_JOURNAL_MODES:
+            raise ValueError(f"Invalid journal mode: {target!r}")
+
+        with self._connection() as conn:
+            current = conn.execute("PRAGMA journal_mode").fetchone()[0]
+            if current.lower() == target:
+                return
+
+            if current.lower() == "wal":
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            conn.execute(f"PRAGMA journal_mode = {target}")
+            logger.info("Switched journal mode from %s to %s", current, target)
+
     def _ensure_schema(self) -> None:
         """Create tables and run migrations."""
+        self._ensure_journal_mode()
+
         with self._connection() as conn:
             # Core schema (jobs, history, sessions, etc.)
             conn.executescript(SCHEMA_SQL)
@@ -409,7 +456,8 @@ class MCFDatabase:
         4. External-content FTS indexes can get out of sync after DB
            copy/mount, causing IntegrityError in triggers on UPDATE
         """
-        with self._connection() as conn:
+        conn = self._connect()
+        try:
             # Check if FTS table exists
             fts_exists = conn.execute("""
                 SELECT name FROM sqlite_master
@@ -419,34 +467,59 @@ class MCFDatabase:
             if not fts_exists:
                 logger.info("Creating FTS5 index for jobs...")
                 conn.executescript(FTS5_SCHEMA)
-
-            # Always rebuild to ensure FTS content matches the jobs table.
-            # External-content FTS indexes can silently drift after DB
-            # copy, Docker volume mount, or WAL recovery.
-            jobs_count = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
-            if jobs_count > 0:
-                try:
+                # Populate FTS for existing jobs (first-time setup)
+                jobs_count = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+                if jobs_count > 0:
                     conn.execute("INSERT INTO jobs_fts(jobs_fts) VALUES('rebuild')")
-                except Exception:
-                    logger.warning("FTS5 rebuild failed, dropping and recreating...")
-                    try:
-                        conn.execute("DROP TABLE IF EXISTS jobs_fts")
-                    except sqlite3.DatabaseError:
-                        # FTS internal tables may be malformed — drop them
-                        # individually so the virtual table can be recreated.
-                        for suffix in ("", "_data", "_idx", "_content", "_docsize", "_config"):
-                            try:
-                                conn.execute(f"DROP TABLE IF EXISTS jobs_fts{suffix}")
-                            except Exception:
-                                pass
-                    conn.executescript(FTS5_SCHEMA)
-                    conn.execute("INSERT INTO jobs_fts(jobs_fts) VALUES('rebuild')")
-
-            conn.commit()
-            if not fts_exists:
+                conn.commit()
                 logger.info("FTS5 index created")
             else:
-                logger.debug("FTS5 index verified")
+                # FTS table exists — run FTS5's built-in integrity check.
+                # A simple SELECT COUNT(*) doesn't detect page-level corruption
+                # in the shadow tables; integrity-check walks the B-tree pages.
+                try:
+                    conn.execute("INSERT INTO jobs_fts(jobs_fts) VALUES('integrity-check')")
+                    logger.debug("FTS5 index verified")
+                except Exception:
+                    logger.warning("FTS5 index corrupt, rebuilding...")
+                    conn.close()
+                    conn = self._repair_fts5()
+                    conn.commit()
+                    logger.info("FTS5 index rebuilt after recovery")
+        finally:
+            conn.close()
+
+    def _repair_fts5(self) -> sqlite3.Connection:
+        """Drop malformed FTS5 tables and recreate from scratch."""
+        conn = self._connect()
+        # Try normal DROP first for each shadow table individually.
+        suffixes = ("", "_data", "_idx", "_content", "_docsize", "_config")
+        all_dropped = True
+        for suffix in suffixes:
+            table = f"jobs_fts{suffix}"
+            try:
+                conn.executescript(f"DROP TABLE IF EXISTS {table};")
+            except Exception:
+                logger.warning("Could not DROP %s normally", table)
+                all_dropped = False
+
+        if not all_dropped:
+            # Corruption prevents normal DROP — forcibly remove table
+            # entries from sqlite_master and reclaim space with VACUUM.
+            logger.warning("Using writable_schema to remove corrupted FTS tables")
+            conn.execute("PRAGMA writable_schema = ON")
+            conn.execute(
+                "DELETE FROM sqlite_master WHERE name LIKE 'jobs_fts%'"
+            )
+            conn.execute("PRAGMA writable_schema = OFF")
+            conn.commit()
+            # VACUUM reclaims orphaned pages from the corrupted tables.
+            conn.execute("VACUUM")
+
+        conn.executescript(FTS5_SCHEMA)
+        conn.execute("INSERT INTO jobs_fts(jobs_fts) VALUES('rebuild')")
+        logger.info("FTS5 index rebuilt after recovery")
+        return conn
 
     def upsert_job(
         self,

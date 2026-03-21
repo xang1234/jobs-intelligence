@@ -63,9 +63,9 @@ $COMPOSE_CMD restart backend
 
 echo "Waiting for health check (up to 90s)..."
 for i in $(seq 1 18); do
-    if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+    if curl -sf http://localhost:8080/health > /dev/null 2>&1; then
         echo ""
-        curl -sf http://localhost:8000/health | python3 -m json.tool
+        curl -sf http://localhost:8080/health | python3 -m json.tool
         echo "Bootstrap complete."
         exit 0
     fi

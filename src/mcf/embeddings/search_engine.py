@@ -101,7 +101,7 @@ class SemanticSearchEngine:
             index_dir: Directory containing FAISS indexes
             model_version: Embedding model version for compatibility
         """
-        self.db = MCFDatabase(db_path)
+        self.db = MCFDatabase(db_path, ensure_schema=False)
         self.index_dir = Path(index_dir)
         self.model_version = model_version
 

@@ -424,7 +424,7 @@ class EmbeddingGenerator:
 
                 company_centroids[company] = centroids
 
-            if (idx + 1) % 5000 == 0:
+            if (idx + 1) % 2000 == 0:
                 logger.info(f"  Company centroids: {idx + 1}/{total} processed")
 
         logger.info(

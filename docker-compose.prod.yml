@@ -4,6 +4,9 @@
 services:
   backend:
     restart: unless-stopped
+    volumes:
+      - /opt/mcf/data:/app/data
+      - hf-cache:/app/.cache/huggingface
     environment:
       - MCF_RATE_LIMIT_RPM=100
     deploy:
@@ -36,16 +39,8 @@ services:
         max-size: "10m"
         max-file: "5"
 
-# Bind mounts for direct host access (backups, inspection).
-# Adjust the device paths to match your homelab layout.
 # Host directories must exist: mkdir -p /opt/mcf/data/embeddings /opt/mcf/hf-cache
 volumes:
-  mcf-data:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: /opt/mcf/data
   hf-cache:
     driver: local
     driver_opts:

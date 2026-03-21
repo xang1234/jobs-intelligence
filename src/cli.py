@@ -53,6 +53,19 @@ app = typer.Typer(
 console = Console()
 
 
+def _parse_since_date(since: Optional[str]) -> "date | None":
+    """Parse a YYYY-MM-DD string into a date, or exit on bad format."""
+    if since is None:
+        return None
+    from datetime import date
+
+    try:
+        return date.fromisoformat(since)
+    except ValueError:
+        console.print(f"[red]Invalid date format: {since}. Use YYYY-MM-DD.[/red]")
+        raise typer.Exit(1)
+
+
 def setup_logging(verbose: bool = False) -> None:
     """Configure logging with Rich handler."""
     level = logging.DEBUG if verbose else logging.INFO
@@ -1430,6 +1443,9 @@ def generate_embeddings(
     ),
     index_dir: str = typer.Option("data/embeddings", "--index-dir", help="Directory for FAISS index files"),
     db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Path to SQLite database"),
+    since: Optional[str] = typer.Option(
+        None, "--since", help="Only embed jobs posted on or after this date (YYYY-MM-DD)"
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging"),
 ) -> None:
     """
@@ -1443,8 +1459,10 @@ def generate_embeddings(
         mcf embed-generate --batch-size 64
         mcf embed-generate --no-skip-existing  # Regenerate all
         mcf embed-generate --no-build-index    # Skip index building
+        mcf embed-generate --since 2026-01-01  # Only 2026 jobs
     """
     setup_logging(verbose)
+    since_date = _parse_since_date(since)
 
     console.print("\n[bold blue]Generating Embeddings[/bold blue]")
     console.print("━" * 40)
@@ -1454,11 +1472,13 @@ def generate_embeddings(
 
     console.print(f"Model: [green]{generator.model_name}[/green] ({generator.DIMENSION} dimensions)")
     console.print(f"Database: [green]{db_path}[/green]")
+    if since_date:
+        console.print(f"Since: [green]{since_date.isoformat()}[/green]")
     console.print()
 
     # Get initial count for progress
     if skip_existing:
-        jobs_to_process = db.get_jobs_without_embeddings(limit=1000000)
+        jobs_to_process = db.get_jobs_without_embeddings(limit=1000000, since=since_date)
         total_jobs = len(jobs_to_process)
         if total_jobs == 0:
             console.print("[green]✓ All jobs already have embeddings![/green]")
@@ -1470,7 +1490,10 @@ def generate_embeddings(
             return
         console.print(f"Jobs to process: [cyan]{total_jobs:,}[/cyan] (skipping existing)")
     else:
-        total_jobs = db.count_jobs()
+        if since_date:
+            total_jobs = db.count_jobs_since(since_date)
+        else:
+            total_jobs = db.count_jobs()
         console.print(f"Jobs to process: [cyan]{total_jobs:,}[/cyan] (regenerating all)")
 
     console.print()
@@ -1501,6 +1524,7 @@ def generate_embeddings(
             batch_size=batch_size,
             skip_existing=skip_existing,
             progress_callback=on_progress,
+            since=since_date,
         )
 
     # Print embedding summary
@@ -1650,6 +1674,9 @@ def sync_embeddings(
     ),
     index_dir: str = typer.Option("data/embeddings", "--index-dir", help="Directory for FAISS index files"),
     db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Path to SQLite database"),
+    since: Optional[str] = typer.Option(
+        None, "--since", help="Only sync jobs posted on or after this date (YYYY-MM-DD)"
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging"),
 ) -> None:
     """
@@ -1662,8 +1689,10 @@ def sync_embeddings(
         mcf embed-sync
         mcf scrape "data scientist" && mcf embed-sync  # Chain commands
         mcf embed-sync --no-update-index  # Skip index update
+        mcf embed-sync --since 2026-02-20  # Only recent jobs
     """
     setup_logging(verbose)
+    since_date = _parse_since_date(since)
 
     console.print("\n[bold blue]Syncing Embeddings[/bold blue]")
     console.print("━" * 40)
@@ -1671,8 +1700,11 @@ def sync_embeddings(
     db = MCFDatabase(db_path)
     generator = EmbeddingGenerator()
 
+    if since_date:
+        console.print(f"Since: [green]{since_date.isoformat()}[/green]")
+
     # Check how many jobs need embeddings
-    jobs_to_process = db.get_jobs_without_embeddings(limit=1000000)
+    jobs_to_process = db.get_jobs_without_embeddings(limit=1000000, since=since_date)
     total_new = len(jobs_to_process)
 
     if total_new == 0:
@@ -1704,6 +1736,7 @@ def sync_embeddings(
             batch_size=batch_size,
             skip_existing=True,
             progress_callback=on_progress,
+            since=since_date,
         )
 
     console.print(f"\n[green]✓ Synced {stats.jobs_processed:,} jobs in {stats.elapsed_seconds:.1f}s[/green]")
