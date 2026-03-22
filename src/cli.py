@@ -49,6 +49,7 @@ from src.mcf.embeddings import (
     SearchResponse,
     SemanticSearchEngine,
     export_sentence_transformer_to_onnx,
+    validate_embedding_backend_config,
 )
 
 app = typer.Typer(
@@ -73,6 +74,12 @@ def _create_embedding_generator(
     onnx_model_dir: str | Path | None = None,
 ) -> EmbeddingGenerator:
     """Create an embedding generator with the selected backend settings."""
+    validate_embedding_backend_config(
+        backend=backend,
+        model_name=model_name or EmbeddingGenerator.MODEL_NAME,
+        dimension=EmbeddingGenerator.DIMENSION,
+        onnx_model_dir=onnx_model_dir,
+    )
     return EmbeddingGenerator(
         model_name=model_name,
         device=device,

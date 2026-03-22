@@ -40,6 +40,7 @@ from .backends import (
     TorchSentenceTransformerBackend,
     create_embedding_backend,
     export_sentence_transformer_to_onnx,
+    validate_embedding_backend_config,
 )
 from .generator import EmbeddingGenerator
 from .index_manager import (
@@ -73,6 +74,7 @@ __all__ = [
     "DEFAULT_EMBEDDING_BACKEND",
     "create_embedding_backend",
     "export_sentence_transformer_to_onnx",
+    "validate_embedding_backend_config",
     # Index management
     "FAISSIndexManager",
     "IndexNotBuiltError",

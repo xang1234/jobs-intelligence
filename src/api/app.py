@@ -36,7 +36,7 @@ from ..mcf.career_delta import (
     SkillScenarioSignal,
 )
 from ..mcf.career_delta_retrieval import SearchEngineCareerDeltaProvider
-from ..mcf.embeddings import SemanticSearchEngine
+from ..mcf.embeddings import EmbeddingGenerator, SemanticSearchEngine, validate_embedding_backend_config
 from ..mcf.embeddings.models import SimilarJobsRequest as InternalSimilarJobsRequest
 from ..mcf.industry_taxonomy import normalize_title_family
 from ..mcf.market_stats import MarketStatsCache
@@ -358,6 +358,12 @@ def create_app(
         embedding_backend = os.environ.get("MCF_EMBEDDING_BACKEND", "torch")
     if onnx_model_dir is None:
         onnx_model_dir = os.environ.get("MCF_ONNX_MODEL_DIR")
+    validate_embedding_backend_config(
+        backend=embedding_backend,
+        model_name=EmbeddingGenerator.MODEL_NAME,
+        dimension=EmbeddingGenerator.DIMENSION,
+        onnx_model_dir=onnx_model_dir,
+    )
     if cors_origins is None:
         env_origins = os.environ.get("MCF_CORS_ORIGINS")
         if env_origins:

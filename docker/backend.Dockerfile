@@ -49,7 +49,6 @@ COPY src/ ./src/
 ENV MCF_DB_PATH=/app/data/mcf_jobs.db \
     MCF_INDEX_DIR=/app/data/embeddings \
     MCF_EMBEDDING_BACKEND=torch \
-    MCF_ONNX_MODEL_DIR=/app/data/models/all-MiniLM-L6-v2-onnx \
     MCF_CORS_ORIGINS=* \
     MCF_RATE_LIMIT_RPM=100 \
     MCF_SQLITE_JOURNAL_MODE=delete \

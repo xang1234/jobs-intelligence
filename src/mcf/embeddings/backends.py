@@ -378,6 +378,25 @@ def create_embedding_backend(
     )
 
 
+def validate_embedding_backend_config(
+    *,
+    backend: str,
+    model_name: str,
+    dimension: int,
+    onnx_model_dir: str | Path | None = None,
+) -> None:
+    """Eagerly validate backend configuration without keeping the backend alive."""
+    embedding_backend = create_embedding_backend(
+        backend=backend,
+        model_name=model_name,
+        dimension=dimension,
+        onnx_model_dir=onnx_model_dir,
+    )
+    if embedding_backend.backend_name == "onnx":
+        # Force path/session validation so startup fails before serving requests.
+        embedding_backend.raw_model
+
+
 def export_sentence_transformer_to_onnx(
     model_name: str,
     output_dir: str | Path,
