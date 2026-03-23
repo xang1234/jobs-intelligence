@@ -22,6 +22,23 @@ RUN poetry export -f requirements.txt --without-hashes --without dev --with ml -
 # export/dev workflows outside the production container.
 RUN pip install --no-cache-dir -r requirements.txt
 
+# ── Stage 1b: Export bundled ONNX model ──────────────────────────────────────
+# Build the default ONNX bundle once during image build, then copy only the
+# exported artifact into the runtime image. The throwaway stage keeps torch and
+# sentence-transformers out of production.
+
+FROM builder AS onnx-export
+
+RUN poetry export -f requirements.txt --without-hashes --without dev --with ml,ml_torch -o requirements-onnx-export.txt
+RUN pip install --no-cache-dir -r requirements-onnx-export.txt
+
+WORKDIR /app
+COPY src/ ./src/
+
+ENV HF_HOME=/tmp/huggingface
+
+RUN python -m src.cli embed-export-onnx all-MiniLM-L6-v2 --output-dir /opt/mcf/models/all-MiniLM-L6-v2-onnx --overwrite
+
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
 # Clean slim image with only the installed packages + application source.
 
@@ -36,17 +53,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy installed Python packages from builder
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
+COPY --from=onnx-export /opt/mcf/models/all-MiniLM-L6-v2-onnx /opt/mcf/models/all-MiniLM-L6-v2-onnx
 
 WORKDIR /app
 
 # Copy application source
 COPY src/ ./src/
 
-# Environment: paths match the Docker volume mounts in docker-compose.yml
+# Environment: the ONNX bundle lives outside /app/data so host volume mounts do
+# not shadow it. Database and FAISS indexes still come from the mounted data/
+# volume in docker-compose.yml.
 ENV MCF_DB_PATH=/app/data/mcf_jobs.db \
     MCF_INDEX_DIR=/app/data/embeddings \
     MCF_EMBEDDING_BACKEND=onnx \
-    MCF_ONNX_MODEL_DIR=/app/data/models/all-MiniLM-L6-v2-onnx \
+    MCF_ONNX_MODEL_DIR=/opt/mcf/models/all-MiniLM-L6-v2-onnx \
     MCF_CORS_ORIGINS=* \
     MCF_RATE_LIMIT_RPM=100 \
     MCF_SQLITE_JOURNAL_MODE=delete \

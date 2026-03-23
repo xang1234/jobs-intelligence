@@ -8,15 +8,7 @@ IMAGE_TAG="${IMAGE_TAG:-mcf-backend-onnx-smoke}"
 CONTAINER_NAME="${CONTAINER_NAME:-mcf-backend-onnx-smoke}"
 PORT="${PORT:-18080}"
 SMOKE_DIR="${SMOKE_DIR:-}"
-
-if command -v poetry >/dev/null 2>&1; then
-    POETRY_BIN="poetry"
-elif [ -x "$HOME/.local/bin/poetry" ]; then
-    POETRY_BIN="$HOME/.local/bin/poetry"
-else
-    echo "poetry not found on PATH"
-    exit 1
-fi
+DOCKER_RUN_USER=(-u "$(id -u):$(id -g)")
 
 cleanup() {
     docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
@@ -32,19 +24,29 @@ if [ -z "$SMOKE_DIR" ]; then
 fi
 
 echo "Using smoke directory: $SMOKE_DIR"
-mkdir -p "$SMOKE_DIR"/embeddings "$SMOKE_DIR"/models
+mkdir -p "$SMOKE_DIR"/embeddings
 rm -f "$SMOKE_DIR"/health.json "$SMOKE_DIR"/search.json
 
-"$POETRY_BIN" run python scripts/create_smoke_dataset.py --db "$SMOKE_DIR/mcf_jobs.db"
-"$POETRY_BIN" run python -m src.cli embed-export-onnx all-MiniLM-L6-v2 --output-dir "$SMOKE_DIR/models/all-MiniLM-L6-v2-onnx" --overwrite
-"$POETRY_BIN" run python -m src.cli embed-generate \
-    --db "$SMOKE_DIR/mcf_jobs.db" \
-    --index-dir "$SMOKE_DIR/embeddings" \
-    --onnx-model-dir "$SMOKE_DIR/models/all-MiniLM-L6-v2-onnx" \
-    --batch-size 2 \
-    --no-skip-existing
-
 docker build -f docker/backend.Dockerfile -t "$IMAGE_TAG" .
+docker run --rm \
+    "${DOCKER_RUN_USER[@]}" \
+    -e PYTHONDONTWRITEBYTECODE=1 \
+    -v "$ROOT_DIR:/workspace" \
+    -v "$SMOKE_DIR:/app/data" \
+    -w /workspace \
+    "$IMAGE_TAG" \
+    python scripts/create_smoke_dataset.py --db /app/data/mcf_jobs.db
+docker run --rm \
+    "${DOCKER_RUN_USER[@]}" \
+    -e PYTHONDONTWRITEBYTECODE=1 \
+    -v "$SMOKE_DIR:/app/data" \
+    "$IMAGE_TAG" \
+    python -m src.cli embed-generate \
+        --db /app/data/mcf_jobs.db \
+        --index-dir /app/data/embeddings \
+        --batch-size 2 \
+        --no-skip-existing
+
 docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
 docker run -d \
     --name "$CONTAINER_NAME" \

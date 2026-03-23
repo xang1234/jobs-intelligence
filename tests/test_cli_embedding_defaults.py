@@ -29,6 +29,22 @@ def test_create_embedding_generator_defaults_to_onnx_dir(monkeypatch):
     assert captured["onnx_model_dir"] == Path("data/models/all-MiniLM-L6-v2-onnx")
 
 
+def test_create_embedding_generator_prefers_env_onnx_dir(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_validate(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(cli, "validate_embedding_backend_config", fake_validate)
+    monkeypatch.setenv("MCF_ONNX_MODEL_DIR", "/opt/mcf/models/all-MiniLM-L6-v2-onnx")
+
+    generator = cli._create_embedding_generator()
+
+    assert generator.backend_name == "onnx"
+    assert generator.onnx_model_dir == Path("/opt/mcf/models/all-MiniLM-L6-v2-onnx")
+    assert captured["onnx_model_dir"] == "/opt/mcf/models/all-MiniLM-L6-v2-onnx"
+
+
 def test_api_serve_defaults_to_onnx(monkeypatch, temp_dir: Path):
     db_path = temp_dir / "smoke.db"
     db_path.touch()

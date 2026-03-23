@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sqlite3
 import sys
 from datetime import date
@@ -77,6 +78,9 @@ def _resolve_cli_onnx_model_dir(
         return onnx_model_dir
     if backend.strip().lower() != "onnx":
         return None
+    env_onnx_model_dir = os.environ.get("MCF_ONNX_MODEL_DIR")
+    if env_onnx_model_dir:
+        return env_onnx_model_dir
     return _default_onnx_model_dir(model_name or EmbeddingGenerator.MODEL_NAME)
 
 
@@ -2526,8 +2530,6 @@ def serve_api(
         mcf api-serve --reload            # Auto-reload for dev
         mcf api-serve --workers 4         # Production mode
     """
-    import os
-
     import uvicorn
 
     onnx_model_dir = _resolve_cli_onnx_model_dir(

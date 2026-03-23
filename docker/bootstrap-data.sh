@@ -13,8 +13,6 @@ set -euo pipefail
 
 COMPOSE_CMD="docker compose"
 PROD=false
-ONNX_MODEL_DIR="data/models/all-MiniLM-L6-v2-onnx"
-ONNX_EXPORT_CMD='python -m src.cli embed-export-onnx all-MiniLM-L6-v2 --output-dir data/models/all-MiniLM-L6-v2-onnx'
 
 if [[ "${1:-}" == "--prod" ]]; then
     PROD=true
@@ -26,13 +24,6 @@ fi
 if [ ! -f data/mcf_jobs.db ]; then
     echo "ERROR: data/mcf_jobs.db not found."
     echo "Run the scraper first: python -m src.cli scrape \"data scientist\""
-    exit 1
-fi
-
-if [ ! -d "$ONNX_MODEL_DIR" ]; then
-    echo "ERROR: ONNX model bundle not found: $ONNX_MODEL_DIR"
-    echo "Export it before bootstrapping Docker:"
-    echo "  $ONNX_EXPORT_CMD"
     exit 1
 fi
 
@@ -48,12 +39,6 @@ if $PROD; then
         mkdir -p /opt/mcf/data/embeddings
         cp -r data/embeddings/* /opt/mcf/data/embeddings/
     fi
-
-    if [ -d data/models ]; then
-        echo "Copying ONNX models to /opt/mcf/data/models/ ..."
-        mkdir -p /opt/mcf/data/models
-        cp -r data/models/* /opt/mcf/data/models/
-    fi
 else
     # Named volumes: use docker cp into the running container
     if ! docker ps --format '{{.Names}}' | grep -q '^mcf-backend$'; then
@@ -68,11 +53,6 @@ else
     if [ -d data/embeddings ]; then
         echo "Copying embeddings into container..."
         docker cp data/embeddings/ mcf-backend:/app/data/
-    fi
-
-    if [ -d data/models ]; then
-        echo "Copying ONNX models into container..."
-        docker cp data/models/ mcf-backend:/app/data/
     fi
 fi
 

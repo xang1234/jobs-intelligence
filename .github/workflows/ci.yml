@@ -93,26 +93,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install Poetry
-        run: pipx install poetry
-
-      - name: Cache Poetry venv
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pypoetry
-          key: poetry-docker-smoke-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
-          restore-keys: poetry-docker-smoke-${{ runner.os }}-
-
-      - name: Install CPU-only PyTorch for ONNX export
-        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
-
-      - name: Install dependencies for export + runtime
-        run: poetry install --with ml,ml_torch
-
       - name: Run Docker ONNX smoke test
         run: bash scripts/run_docker_onnx_smoke.sh
 

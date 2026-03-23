@@ -45,19 +45,21 @@ Scrapes the full MCF job archive (2019–present, ~6M listings), builds hybrid B
 ```bash
 poetry install --with ml,ml_torch
 poetry run python -m src.cli scrape "data scientist"
-# Export the default ONNX bundle once for local CLI and Docker usage.
+# Export the default ONNX bundle once for local CLI usage.
 poetry run python -m src.cli embed-export-onnx all-MiniLM-L6-v2 --output-dir data/models/all-MiniLM-L6-v2-onnx
 poetry run python -m src.cli embed-generate
 poetry run python -m src.cli api-serve --reload    # Swagger UI at localhost:8000/docs
 cd src/frontend && npm install && npm run dev       # Frontend at localhost:5173
 
 # Or run everything with Docker
-# Export the ONNX bundle once so the backend container can mount it from data/models/
-poetry run python -m src.cli embed-export-onnx all-MiniLM-L6-v2 --output-dir data/models/all-MiniLM-L6-v2-onnx
-# Rebuild embeddings/indexes for the ONNX runtime.
-poetry run python -m src.cli embed-generate --no-skip-existing
+# The backend image exports and bundles the default ONNX model during build.
+docker compose build backend
+# Rebuild embeddings/indexes inside the container so they match the bundled ONNX runtime.
+docker compose run --rm backend python -m src.cli embed-generate --no-skip-existing
 docker compose up
 ```
+
+The first Docker backend build is slower because it downloads and exports the bundled ONNX model once. After that, Docker deployments no longer depend on a host-side `data/models/...` bundle.
 
 > **Tip:** `alias mcf="poetry run python -m src.cli"` — then `mcf scrape`, `mcf search`, etc.
 
