@@ -23,7 +23,12 @@ from rich.table import Table
 # Add project root to path so we can import src.*
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.mcf.embeddings import FAISSIndexManager, SemanticSearchEngine, default_onnx_model_dir
+from src.mcf.embeddings import (
+    FAISSIndexManager,
+    SemanticSearchEngine,
+    default_onnx_model_dir,
+    validate_embedding_backend_config,
+)
 from src.mcf.embeddings.generator import EmbeddingGenerator
 from src.mcf.embeddings.models import SearchRequest
 
@@ -343,6 +348,22 @@ def main() -> int:
     args = parser.parse_args()
     if args.embedding_backend.strip().lower() == "onnx" and args.onnx_model_dir is None:
         args.onnx_model_dir = str(default_onnx_model_dir(EmbeddingGenerator.MODEL_NAME))
+    try:
+        validate_embedding_backend_config(
+            backend=args.embedding_backend,
+            model_name=EmbeddingGenerator.MODEL_NAME,
+            dimension=EmbeddingGenerator.DIMENSION,
+            onnx_model_dir=args.onnx_model_dir,
+        )
+    except (FileNotFoundError, ModuleNotFoundError, ValueError) as exc:
+        console.print(f"[red]Invalid embedding backend configuration:[/red] {exc}")
+        if args.embedding_backend.strip().lower() == "onnx":
+            console.print("[yellow]Export the ONNX bundle first:[/yellow]")
+            console.print(
+                "  python -m src.cli embed-export-onnx "
+                f"{EmbeddingGenerator.MODEL_NAME} --output-dir {args.onnx_model_dir}"
+            )
+        return 1
 
     console.print("[bold]MCF Semantic Search Benchmark[/bold]")
     console.print(f"[dim]Embedding backend: {args.embedding_backend}[/dim]")

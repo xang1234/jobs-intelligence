@@ -42,3 +42,16 @@ def test_benchmark_index_load_uses_supplied_model_version(monkeypatch, tmp_path:
     assert captured["model_version"] == "all-MiniLM-L6-v2+onnx"
     assert result["index_type"] == "IndexFlatIP"
     assert result["n_vectors"] == 321
+
+
+def test_main_fails_cleanly_for_missing_onnx_bundle(monkeypatch):
+    monkeypatch.setattr(
+        benchmark,
+        "validate_embedding_backend_config",
+        lambda **kwargs: (_ for _ in ()).throw(FileNotFoundError("missing ONNX bundle")),
+    )
+    monkeypatch.setattr(benchmark.sys, "argv", ["benchmark.py"])
+
+    result = benchmark.main()
+
+    assert result == 1

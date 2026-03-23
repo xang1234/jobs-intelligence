@@ -412,8 +412,12 @@ class MCFDatabase:
                 finally:
                     conn.execute("""
                         CREATE TRIGGER IF NOT EXISTS jobs_au AFTER UPDATE ON jobs BEGIN
-                            INSERT INTO jobs_fts(jobs_fts, rowid, uuid, title, description, skills, company_name)
-                            VALUES ('delete', old.id, old.uuid, old.title, old.description, old.skills, old.company_name);
+                            INSERT INTO jobs_fts(
+                                jobs_fts, rowid, uuid, title, description, skills, company_name
+                            )
+                            VALUES (
+                                'delete', old.id, old.uuid, old.title, old.description, old.skills, old.company_name
+                            );
                             INSERT INTO jobs_fts(rowid, uuid, title, description, skills, company_name)
                             VALUES (new.id, new.uuid, new.title, new.description, new.skills, new.company_name);
                         END
@@ -1871,7 +1875,11 @@ class MCFDatabase:
             return np.frombuffer(row[0], dtype=np.float32)
         return None
 
-    def get_all_embeddings(self, entity_type: str) -> tuple[list[str], np.ndarray]:
+    def get_all_embeddings(
+        self,
+        entity_type: str,
+        model_version: str | None = None,
+    ) -> tuple[list[str], np.ndarray]:
         """
         Get all embeddings of a type as (IDs, stacked array).
 
@@ -1879,16 +1887,28 @@ class MCFDatabase:
 
         Args:
             entity_type: 'job', 'skill', or 'company'
+            model_version: Optional model version filter
 
         Returns:
             Tuple of (entity_ids, embeddings_matrix)
             embeddings_matrix has shape (n_entities, embedding_dim)
         """
         with self._connection() as conn:
-            rows = conn.execute(
-                "SELECT entity_id, embedding_blob FROM embeddings WHERE entity_type = ? ORDER BY id",
-                (entity_type,),
-            ).fetchall()
+            if model_version is None:
+                rows = conn.execute(
+                    "SELECT entity_id, embedding_blob FROM embeddings WHERE entity_type = ? ORDER BY id",
+                    (entity_type,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT entity_id, embedding_blob
+                    FROM embeddings
+                    WHERE entity_type = ? AND model_version = ?
+                    ORDER BY id
+                    """,
+                    (entity_type, model_version),
+                ).fetchall()
 
         if not rows:
             return [], np.array([])
@@ -1897,12 +1917,17 @@ class MCFDatabase:
         embeddings = np.array([np.frombuffer(row[1], dtype=np.float32) for row in rows])
         return ids, embeddings
 
-    def get_embeddings_for_uuids(self, uuids: list[str]) -> dict[str, np.ndarray]:
+    def get_embeddings_for_uuids(
+        self,
+        uuids: list[str],
+        model_version: str | None = None,
+    ) -> dict[str, np.ndarray]:
         """
         Get embeddings for specific job UUIDs.
 
         Args:
             uuids: List of job UUIDs
+            model_version: Optional model version filter
 
         Returns:
             Dict mapping uuid -> embedding array
@@ -1912,11 +1937,15 @@ class MCFDatabase:
 
         placeholders = ",".join("?" * len(uuids))
         with self._connection() as conn:
-            rows = conn.execute(
+            query = (
                 f"SELECT entity_id, embedding_blob FROM embeddings "
-                f"WHERE entity_type = 'job' AND entity_id IN ({placeholders})",
-                uuids,
-            ).fetchall()
+                f"WHERE entity_type = 'job' AND entity_id IN ({placeholders})"
+            )
+            params: list[str] = list(uuids)
+            if model_version is not None:
+                query += " AND model_version = ?"
+                params.append(model_version)
+            rows = conn.execute(query, params).fetchall()
 
         return {row[0]: np.frombuffer(row[1], dtype=np.float32) for row in rows}
 
@@ -2864,7 +2893,12 @@ class MCFDatabase:
             )
         return dict(result)
 
-    def get_jobs_without_embeddings(self, limit: int = 1000, since: "date | None" = None) -> list[dict]:
+    def get_jobs_without_embeddings(
+        self,
+        limit: int = 1000,
+        since: "date | None" = None,
+        model_version: str | None = None,
+    ) -> list[dict]:
         """
         Get jobs that don't have embeddings yet.
 
@@ -2873,18 +2907,31 @@ class MCFDatabase:
         Args:
             limit: Maximum jobs to return
             since: Only include jobs posted on or after this date
+            model_version: Optional model version to treat as current
 
         Returns:
             List of job dicts with uuid, title, description, skills
         """
         with self._connection() as conn:
+            params: list = []
             query = """
                 SELECT j.uuid, j.title, j.description, j.skills, j.company_name
                 FROM jobs j
                 LEFT JOIN embeddings e ON j.uuid = e.entity_id AND e.entity_type = 'job'
+                """
+            if model_version is not None:
+                query = """
+                    SELECT j.uuid, j.title, j.description, j.skills, j.company_name
+                    FROM jobs j
+                    LEFT JOIN embeddings e
+                      ON j.uuid = e.entity_id
+                     AND e.entity_type = 'job'
+                     AND e.model_version = ?
+                    """
+                params.append(model_version)
+            query += """
                 WHERE e.id IS NULL
                 """
-            params: list = []
             if since is not None:
                 query += " AND j.posted_date >= ?"
                 params.append(since.isoformat())

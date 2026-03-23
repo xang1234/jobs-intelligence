@@ -407,6 +407,21 @@ class TestEmbeddings:
         assert len(ids) == 20  # test_db has 20 jobs
         assert embeddings.shape == (20, 384)
 
+    def test_get_all_embeddings_can_filter_by_model_version(self, test_db: MCFDatabase):
+        """Filtering by model version should exclude embeddings from other backends."""
+        jobs = test_db.search_jobs(limit=2)
+        first_uuid = jobs[0]["uuid"]
+        second_uuid = jobs[1]["uuid"]
+        embedding = np.ones(384, dtype=np.float32)
+
+        test_db.upsert_embedding(first_uuid, "job", embedding, model_version="all-MiniLM-L6-v2")
+        test_db.upsert_embedding(second_uuid, "job", embedding, model_version="all-MiniLM-L6-v2+onnx")
+
+        ids, embeddings = test_db.get_all_embeddings("job", model_version="all-MiniLM-L6-v2+onnx")
+
+        assert ids == [second_uuid]
+        assert embeddings.shape == (1, 384)
+
     def test_batch_upsert_embeddings(self, empty_db: MCFDatabase, mock_embeddings_batch: tuple):
         """Test batch embedding insertion."""
         uuids, embeddings = mock_embeddings_batch
@@ -433,6 +448,23 @@ class TestEmbeddings:
 
         assert len(embeddings) == 5
         assert all(uuid in embeddings for uuid in uuids)
+
+    def test_get_embeddings_for_uuids_can_filter_by_model_version(self, test_db: MCFDatabase):
+        """UUID lookups should only return embeddings from the requested model version."""
+        jobs = test_db.search_jobs(limit=2)
+        first_uuid = jobs[0]["uuid"]
+        second_uuid = jobs[1]["uuid"]
+        embedding = np.ones(384, dtype=np.float32)
+
+        test_db.upsert_embedding(first_uuid, "job", embedding, model_version="all-MiniLM-L6-v2")
+        test_db.upsert_embedding(second_uuid, "job", embedding, model_version="all-MiniLM-L6-v2+onnx")
+
+        embeddings = test_db.get_embeddings_for_uuids(
+            [first_uuid, second_uuid],
+            model_version="all-MiniLM-L6-v2+onnx",
+        )
+
+        assert list(embeddings.keys()) == [second_uuid]
 
     def test_embedding_stats(self, test_db_with_embeddings: MCFDatabase):
         """Test embedding statistics."""
@@ -656,3 +688,22 @@ class TestCompanyAndSkillsMethods:
         assert len(jobs) <= 10
         assert all("uuid" in j for j in jobs)
         assert all("title" in j for j in jobs)
+
+    def test_get_jobs_without_embeddings_can_filter_by_model_version(self, test_db: MCFDatabase):
+        """Jobs with only old-model embeddings should still be returned for re-embedding."""
+        jobs = test_db.search_jobs(limit=2)
+        torch_uuid = jobs[0]["uuid"]
+        onnx_uuid = jobs[1]["uuid"]
+        embedding = np.ones(384, dtype=np.float32)
+
+        test_db.upsert_embedding(torch_uuid, "job", embedding, model_version="all-MiniLM-L6-v2")
+        test_db.upsert_embedding(onnx_uuid, "job", embedding, model_version="all-MiniLM-L6-v2+onnx")
+
+        pending = test_db.get_jobs_without_embeddings(
+            limit=50,
+            model_version="all-MiniLM-L6-v2+onnx",
+        )
+        pending_uuids = {job["uuid"] for job in pending}
+
+        assert torch_uuid in pending_uuids
+        assert onnx_uuid not in pending_uuids

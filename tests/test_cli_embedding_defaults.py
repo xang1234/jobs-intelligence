@@ -46,6 +46,7 @@ def test_api_serve_defaults_to_onnx(monkeypatch, temp_dir: Path):
         calls["kwargs"] = kwargs
 
     monkeypatch.setattr(uvicorn, "run", fake_run)
+    monkeypatch.setattr(cli, "validate_embedding_backend_config", lambda **kwargs: None)
 
     try:
         result = runner.invoke(
@@ -78,6 +79,7 @@ def test_benchmark_defaults_to_onnx(monkeypatch):
         return subprocess.CompletedProcess(cmd, 0)
 
     monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(cli, "validate_embedding_backend_config", lambda **kwargs: None)
 
     result = runner.invoke(cli.app, ["benchmark", "--queries", "1", "--warmup", "0"])
 
@@ -88,3 +90,29 @@ def test_benchmark_defaults_to_onnx(monkeypatch):
         "--onnx-model-dir",
         "data/models/all-MiniLM-L6-v2-onnx",
     ]
+
+
+def test_search_semantic_fails_cleanly_when_onnx_bundle_is_missing(monkeypatch):
+    def fake_validate(**kwargs):
+        raise FileNotFoundError("missing ONNX bundle")
+
+    monkeypatch.setattr(cli, "validate_embedding_backend_config", fake_validate)
+
+    result = runner.invoke(cli.app, ["search-semantic", "python engineer"])
+
+    assert result.exit_code == 1
+    assert "Invalid embedding backend configuration" in result.stdout
+    assert "embed-export-onnx" in result.stdout
+
+
+def test_benchmark_fails_cleanly_when_onnx_bundle_is_missing(monkeypatch):
+    def fake_validate(**kwargs):
+        raise FileNotFoundError("missing ONNX bundle")
+
+    monkeypatch.setattr(cli, "validate_embedding_backend_config", fake_validate)
+
+    result = runner.invoke(cli.app, ["benchmark", "--queries", "1", "--warmup", "0"])
+
+    assert result.exit_code == 1
+    assert "Invalid embedding backend configuration" in result.stdout
+    assert "embed-export-onnx" in result.stdout

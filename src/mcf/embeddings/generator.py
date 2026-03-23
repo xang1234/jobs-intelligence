@@ -515,7 +515,11 @@ class EmbeddingGenerator:
 
         # Step 1: Count jobs to process
         if skip_existing:
-            jobs_to_process = db.get_jobs_without_embeddings(limit=1000000, since=since)
+            jobs_to_process = db.get_jobs_without_embeddings(
+                limit=1000000,
+                since=since,
+                model_version=self.model_name,
+            )
             stats.jobs_total = len(jobs_to_process)
             if jobs_to_process:
                 db.populate_normalized_job_metadata([job["uuid"] for job in jobs_to_process])

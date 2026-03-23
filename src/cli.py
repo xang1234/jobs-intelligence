@@ -80,6 +80,32 @@ def _resolve_cli_onnx_model_dir(
     return _default_onnx_model_dir(model_name or EmbeddingGenerator.MODEL_NAME)
 
 
+def _validate_cli_backend_config_or_exit(
+    *,
+    backend: str,
+    model_name: str | None = None,
+    onnx_model_dir: str | Path | None = None,
+) -> None:
+    """Validate CLI backend configuration and exit with a helpful message."""
+    try:
+        validate_embedding_backend_config(
+            backend=backend,
+            model_name=model_name or EmbeddingGenerator.MODEL_NAME,
+            dimension=EmbeddingGenerator.DIMENSION,
+            onnx_model_dir=onnx_model_dir,
+        )
+    except (FileNotFoundError, ModuleNotFoundError, ValueError) as exc:
+        console.print(f"[red]Invalid embedding backend configuration:[/red] {exc}")
+        if backend.strip().lower() == "onnx":
+            export_dir = onnx_model_dir or _default_onnx_model_dir(model_name or EmbeddingGenerator.MODEL_NAME)
+            console.print("[yellow]Export the ONNX bundle first:[/yellow]")
+            console.print(
+                f"  python -m src.cli embed-export-onnx "
+                f"{model_name or EmbeddingGenerator.MODEL_NAME} --output-dir {export_dir}"
+            )
+        raise typer.Exit(1)
+
+
 def _create_embedding_generator(
     *,
     model_name: str | None = None,
@@ -1546,7 +1572,11 @@ def generate_embeddings(
 
     # Get initial count for progress
     if skip_existing:
-        jobs_to_process = db.get_jobs_without_embeddings(limit=1000000, since=since_date)
+        jobs_to_process = db.get_jobs_without_embeddings(
+            limit=1000000,
+            since=since_date,
+            model_version=generator.model_name,
+        )
         total_jobs = len(jobs_to_process)
         if total_jobs == 0:
             console.print("[green]✓ All jobs already have embeddings![/green]")
@@ -1652,7 +1682,7 @@ def _build_faiss_indexes(
     ) as progress:
         # Load job embeddings from database
         task = progress.add_task("Loading job embeddings from database...", total=None)
-        job_uuids, job_embeddings = db.get_all_embeddings("job")
+        job_uuids, job_embeddings = db.get_all_embeddings("job", model_version=generator.model_name)
 
         if len(job_uuids) == 0:
             progress.update(task, description="[yellow]No job embeddings found[/yellow]")
@@ -1665,7 +1695,7 @@ def _build_faiss_indexes(
 
         # Load and build skill index
         progress.update(task, description="Loading skill embeddings...")
-        skill_names, skill_embeddings = db.get_all_embeddings("skill")
+        skill_names, skill_embeddings = db.get_all_embeddings("skill", model_version=generator.model_name)
 
         if len(skill_names) > 0:
             progress.update(task, description=f"Building skill index ({len(skill_names):,} skills)...")
@@ -1786,7 +1816,11 @@ def sync_embeddings(
     console.print(f"Backend: [green]{generator.backend_name}[/green]")
 
     # Check how many jobs need embeddings
-    jobs_to_process = db.get_jobs_without_embeddings(limit=1000000, since=since_date)
+    jobs_to_process = db.get_jobs_without_embeddings(
+        limit=1000000,
+        since=since_date,
+        model_version=generator.model_name,
+    )
     total_new = len(jobs_to_process)
 
     if total_new == 0:
@@ -1863,7 +1897,7 @@ def _update_faiss_index(
         return
 
     # Get embeddings for new jobs
-    embeddings_dict = db.get_embeddings_for_uuids(new_uuids)
+    embeddings_dict = db.get_embeddings_for_uuids(new_uuids, model_version=generator.model_name)
 
     if not embeddings_dict:
         console.print("[yellow]No new embeddings to add to index[/yellow]")
@@ -2344,6 +2378,10 @@ def semantic_search_cli(
         backend=embedding_backend,
         onnx_model_dir=onnx_model_dir,
     )
+    _validate_cli_backend_config_or_exit(
+        backend=embedding_backend,
+        onnx_model_dir=onnx_model_dir,
+    )
 
     engine = SemanticSearchEngine(
         db_path,
@@ -2496,6 +2534,10 @@ def serve_api(
         backend=embedding_backend,
         onnx_model_dir=onnx_model_dir,
     )
+    _validate_cli_backend_config_or_exit(
+        backend=embedding_backend,
+        onnx_model_dir=onnx_model_dir,
+    )
 
     origins = [o.strip() for o in cors_origins.split(",") if o.strip()]
 
@@ -2587,6 +2629,10 @@ def run_benchmark(
     import subprocess
 
     onnx_model_dir = _resolve_cli_onnx_model_dir(
+        backend=embedding_backend,
+        onnx_model_dir=onnx_model_dir,
+    )
+    _validate_cli_backend_config_or_exit(
         backend=embedding_backend,
         onnx_model_dir=onnx_model_dir,
     )
