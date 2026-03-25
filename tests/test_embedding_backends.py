@@ -146,19 +146,29 @@ def test_create_app_prefers_database_url_env(monkeypatch):
 
 def test_pgvector_backend_requires_job_embeddings():
     class _FakeEmbeddingDB:
-        def __init__(self, job_embeddings: int):
+        def __init__(self, job_embeddings: int, *, vector_search_supported: bool = True):
             self.job_embeddings = job_embeddings
+            self.vector_search_supported = vector_search_supported
 
         def get_embedding_stats(self):
             return {"job_embeddings": self.job_embeddings}
 
+        def supports_vector_search(self):
+            return self.vector_search_supported
+
     empty_backend = PGVectorBackend(_FakeEmbeddingDB(0), model_version="all-MiniLM-L6-v2")
     ready_backend = PGVectorBackend(_FakeEmbeddingDB(5), model_version="all-MiniLM-L6-v2")
+    unsupported_backend = PGVectorBackend(
+        _FakeEmbeddingDB(5, vector_search_supported=False),
+        model_version="all-MiniLM-L6-v2",
+    )
 
     assert empty_backend.exists() is False
     assert empty_backend.load() is False
     assert ready_backend.exists() is True
     assert ready_backend.load() is True
+    assert unsupported_backend.exists() is False
+    assert unsupported_backend.load() is False
 
 
 def test_create_app_fails_fast_for_missing_onnx_model_dir():

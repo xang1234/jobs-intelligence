@@ -7,6 +7,7 @@ from src.mcf.postgres_migration import (
     MigrationReport,
     _coerce_timestamp_fields,
     _reset_postgres_sequences,
+    _should_skip_resume_copy,
     _stream_sqlite_rows,
 )
 
@@ -85,3 +86,8 @@ def test_coerce_timestamp_fields_replaces_invalid_values_with_none():
     assert payloads[1]["cache_hit"] is False
     assert payloads[1]["degraded"] is True
     assert report.anomalies[-1].issue == "coerced_invalid_timestamp"
+
+
+def test_resume_never_skips_daemon_state_even_when_counts_match():
+    assert _should_skip_resume_copy("jobs", source_count=10, target_count=10) is True
+    assert _should_skip_resume_copy("daemon_state", source_count=1, target_count=1) is False

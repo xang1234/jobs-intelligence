@@ -302,6 +302,18 @@ def _truncate_target_table(conn: Any, table: str) -> None:
     conn.execute(f"TRUNCATE TABLE {table} RESTART IDENTITY CASCADE")
 
 
+def _should_skip_resume_copy(table: str, *, source_count: int, target_count: int) -> bool:
+    """
+    Decide whether a resumed migration can safely skip copying a table.
+
+    ``daemon_state`` must always be recopied because a prior truncated target may
+    contain only the synthetic seed row inserted during schema/bootstrap.
+    """
+    if table == "daemon_state":
+        return False
+    return target_count == source_count
+
+
 def migrate_sqlite_backup_to_postgres(
     *,
     sqlite_path: str | Path,
@@ -328,7 +340,11 @@ def migrate_sqlite_backup_to_postgres(
                 for table in source_counts:
                     target_counts[table] = _postgres_table_count(conn, table)
 
-        if not truncate_first and target_counts.get("jobs") == source_counts["jobs"]:
+        if not truncate_first and _should_skip_resume_copy(
+            "jobs",
+            source_count=source_counts["jobs"],
+            target_count=target_counts.get("jobs", 0),
+        ):
             report.copied_rows["jobs"] = 0
         else:
             conn = target._connect(write_optimized=True)
@@ -350,7 +366,11 @@ def migrate_sqlite_backup_to_postgres(
         conn = target._connect(write_optimized=True)
         try:
             copied = 0
-            if not truncate_first and target_counts.get("job_history") == source_counts["job_history"]:
+            if not truncate_first and _should_skip_resume_copy(
+                "job_history",
+                source_count=source_counts["job_history"],
+                target_count=target_counts.get("job_history", 0),
+            ):
                 report.copied_rows["job_history"] = 0
             else:
                 if not truncate_first and target_counts.get("job_history", 0) > 0:
@@ -383,7 +403,11 @@ def migrate_sqlite_backup_to_postgres(
                 report.copied_rows["job_history"] = copied
 
             for table in ("scrape_sessions", "historical_scrape_progress", "fetch_attempts", "search_analytics"):
-                if not truncate_first and target_counts.get(table) == source_counts[table]:
+                if not truncate_first and _should_skip_resume_copy(
+                    table,
+                    source_count=source_counts[table],
+                    target_count=target_counts.get(table, 0),
+                ):
                     report.copied_rows[table] = 0
                     continue
                 if not truncate_first and target_counts.get(table, 0) > 0:
@@ -408,22 +432,19 @@ def migrate_sqlite_backup_to_postgres(
                 report.copied_rows[table] = copied
 
             daemon_rows: list[dict[str, Any]] = []
-            if not truncate_first and target_counts.get("daemon_state") == source_counts["daemon_state"]:
-                report.copied_rows["daemon_state"] = 0
-            else:
-                for chunk in _stream_sqlite_rows(source, "SELECT * FROM daemon_state", fetch_size=batch_size):
-                    daemon_rows.extend(_coerce_timestamp_fields("daemon_state", chunk, report))
-                if daemon_rows:
-                    conn.execute("DELETE FROM daemon_state")
-                    _executemany(
-                        conn,
-                        """
-                        INSERT INTO daemon_state (id, pid, status, last_heartbeat, started_at, current_year, current_seq)
-                        VALUES (%(id)s, %(pid)s, %(status)s, %(last_heartbeat)s, %(started_at)s, %(current_year)s, %(current_seq)s)
-                        """,
-                        daemon_rows,
-                    )
-                report.copied_rows["daemon_state"] = len(daemon_rows)
+            for chunk in _stream_sqlite_rows(source, "SELECT * FROM daemon_state", fetch_size=batch_size):
+                daemon_rows.extend(_coerce_timestamp_fields("daemon_state", chunk, report))
+            conn.execute("DELETE FROM daemon_state")
+            if daemon_rows:
+                _executemany(
+                    conn,
+                    """
+                    INSERT INTO daemon_state (id, pid, status, last_heartbeat, started_at, current_year, current_seq)
+                    VALUES (%(id)s, %(pid)s, %(status)s, %(last_heartbeat)s, %(started_at)s, %(current_year)s, %(current_seq)s)
+                    """,
+                    daemon_rows,
+                )
+            report.copied_rows["daemon_state"] = len(daemon_rows)
             _reset_postgres_sequences(conn)
             conn.commit()
         except Exception:
@@ -432,7 +453,11 @@ def migrate_sqlite_backup_to_postgres(
         finally:
             conn.close()
 
-        if not truncate_first and target_counts.get("embeddings") == source_counts["embeddings"]:
+        if not truncate_first and _should_skip_resume_copy(
+            "embeddings",
+            source_count=source_counts["embeddings"],
+            target_count=target_counts.get("embeddings", 0),
+        ):
             report.copied_rows["embeddings"] = 0
         else:
             conn = target._connect(write_optimized=True)

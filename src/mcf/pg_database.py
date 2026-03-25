@@ -291,6 +291,10 @@ class PostgresDatabase:
             self._refresh_embedding_storage_kind()
         return self.embedding_storage_kind == EMBEDDING_VECTOR_STORAGE
 
+    def supports_vector_search(self) -> bool:
+        """Return True when pgvector-backed ANN search is actually available."""
+        return self._using_pgvector()
+
     def _embedding_select_clause(self, column: str = "embedding", alias: str = "embedding") -> str:
         expression = f"{column}::text" if self._using_pgvector() else column
         return f"{expression} AS {alias}"
@@ -1874,9 +1878,10 @@ class PostgresDatabase:
         entity_ids: list[str] | None = None,
         prefix: str | None = None,
     ) -> list[tuple[str, float]]:
-        if self._using_pgvector():
-            literal = self._vector_literal(query_embedding)
-        normalized_query = np.asarray(query_embedding, dtype=np.float32)
+        if not self._using_pgvector():
+            raise RuntimeError("pgvector backend requested but pgvector extension is unavailable")
+
+        literal = self._vector_literal(query_embedding)
         params: list[Any] = [entity_type]
         conditions = ["entity_type = %s"]
         if model_version is not None:
@@ -1901,18 +1906,4 @@ class PostgresDatabase:
                     [literal, *params, literal, limit],
                 ).fetchall()
                 return [(row["entity_id"], float(row["score"])) for row in rows]
-
-            rows = conn.execute(
-                f"""
-                SELECT entity_id, {self._embedding_select_clause()}
-                FROM embeddings
-                WHERE {' AND '.join(conditions)}
-                """,
-                params,
-            ).fetchall()
-        scored = [
-            (row["entity_id"], self._cosine_similarity(self._vector_from_value(row["embedding"]), normalized_query))
-            for row in rows
-        ]
-        scored.sort(key=lambda item: item[1], reverse=True)
-        return scored[:limit]
+        return []
