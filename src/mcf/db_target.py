@@ -89,12 +89,37 @@ def resolve_database_value(explicit_value: str | None = None) -> str:
     4. MCF_DB_PATH
     5. data/mcf_jobs.db
     """
+    return resolve_preferred_database_value(explicit_value)
+
+
+def resolve_preferred_database_value(
+    explicit_value: str | None = None,
+    *,
+    include_persisted: bool = False,
+    persisted_path: str | Path = DEFAULT_DATABASE_TARGET_FILE,
+) -> str:
+    """
+    Resolve a database target string from explicit args, env, and optional persisted state.
+
+    Precedence:
+    1. Explicit value
+    2. DATABASE_URL
+    3. MCF_DATABASE_URL
+    4. MCF_DB_PATH
+    5. Persisted target file when enabled
+    6. data/mcf_jobs.db
+    """
     if explicit_value:
         return explicit_value
 
     env_value = resolve_database_value_from_env()
     if env_value:
         return env_value
+
+    if include_persisted:
+        persisted_value = read_persisted_database_target(persisted_path)
+        if persisted_value:
+            return persisted_value
 
     return "data/mcf_jobs.db"
 

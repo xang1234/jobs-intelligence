@@ -45,9 +45,8 @@ from src.mcf import (
 from src.mcf.db_backup import create_sqlite_hot_backup, verify_sqlite_backup
 from src.mcf.db_factory import open_database
 from src.mcf.db_target import (
-    read_persisted_database_target,
     resolve_database_target,
-    resolve_database_value_from_env,
+    resolve_preferred_database_value,
 )
 from src.mcf.hosted_slice import DEFAULT_HOSTED_SLICE_POLICY, HostedSlicePolicy
 from src.mcf.postgres_migration import (
@@ -91,17 +90,19 @@ def _open_database(
     )
 
 
+def _resolve_cli_db_path(db_path: str | None) -> str:
+    """Resolve the preferred CLI database target, including the persisted local default."""
+    return resolve_database_target(
+        resolve_preferred_database_value(
+            db_path,
+            include_persisted=True,
+        )
+    ).value
+
+
 def _resolve_daemon_db_path(db_path: str | None) -> str:
-    """Resolve the daemon database target, allowing a persisted local Postgres default."""
-    if db_path:
-        return resolve_database_target(db_path).value
-    env_value = resolve_database_value_from_env()
-    if env_value:
-        return resolve_database_target(env_value).value
-    persisted_value = read_persisted_database_target()
-    if persisted_value:
-        return resolve_database_target(persisted_value).value
-    return resolve_database_target(None).value
+    """Backward-compatible wrapper for daemon-target resolution."""
+    return _resolve_cli_db_path(db_path)
 
 
 def _default_onnx_model_dir(model_name: str) -> Path:
@@ -208,6 +209,7 @@ def scrape(
     format: str = typer.Option("csv", "--format", "-f", help="Output format: csv or json"),
     no_resume: bool = typer.Option(False, "--no-resume", help="Don't resume from previous checkpoint"),
     rate_limit: float = typer.Option(2.0, "--rate-limit", "-r", help="Requests per second"),
+    db_path: Optional[str] = typer.Option(None, "--db", help="Database path or PostgreSQL DSN"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging"),
 ) -> None:
     """
@@ -219,9 +221,11 @@ def scrape(
         mcf scrape "data engineer" -o ./jobs -f json
     """
     setup_logging(verbose)
+    resolved_db_path = _resolve_cli_db_path(db_path)
 
     console.print("\n[bold blue]MCF Job Scraper[/bold blue]")
     console.print(f"Search query: [green]{query}[/green]")
+    console.print(f"Database: [green]{resolved_db_path}[/green]")
 
     if max_jobs:
         console.print(f"Max jobs: {max_jobs}")
@@ -232,6 +236,7 @@ def scrape(
         scraper = MCFScraper(
             output_dir=output_dir,
             requests_per_second=rate_limit,
+            db_path=resolved_db_path,
         )
 
         with Progress(
@@ -285,6 +290,7 @@ def scrape_multi(
     max_jobs: Optional[int] = typer.Option(None, "--max-jobs", "-n", help="Maximum jobs per query"),
     output_dir: str = typer.Option("data", "--output", "-o", help="Output directory"),
     output_name: str = typer.Option("jobs", "--name", help="Base name for output file"),
+    db_path: Optional[str] = typer.Option(None, "--db", help="Database path or PostgreSQL DSN"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Debug logging"),
 ) -> None:
     """
@@ -294,13 +300,15 @@ def scrape_multi(
         mcf scrape-multi "data scientist" "machine learning" "data engineer"
     """
     setup_logging(verbose)
+    resolved_db_path = _resolve_cli_db_path(db_path)
 
     console.print("\n[bold blue]MCF Multi-Query Scraper[/bold blue]")
     console.print(f"Queries: {', '.join(queries)}")
+    console.print(f"Database: [green]{resolved_db_path}[/green]")
     console.print()
 
     async def run():
-        scraper = MCFScraper(output_dir=output_dir)
+        scraper = MCFScraper(output_dir=output_dir, db_path=resolved_db_path)
 
         with Progress(
             SpinnerColumn(),
@@ -444,7 +452,7 @@ def list_jobs(
     salary_min: Optional[int] = typer.Option(None, "--salary-min", help="Minimum salary"),
     salary_max: Optional[int] = typer.Option(None, "--salary-max", help="Maximum salary"),
     employment_type: Optional[str] = typer.Option(None, "--employment-type", "-e", help="Employment type"),
-    db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Database path"),
+    db_path: Optional[str] = typer.Option(None, "--db", help="Database path or PostgreSQL DSN"),
 ) -> None:
     """
     List jobs from the database with optional filters.
@@ -454,7 +462,7 @@ def list_jobs(
         mcf list --company Google --salary-min 8000
         mcf list --employment-type "Full Time"
     """
-    db = _open_database(db_path, read_only=True)
+    db = _open_database(_resolve_cli_db_path(db_path), read_only=True)
 
     jobs = db.search_jobs(
         company_name=company,
@@ -498,7 +506,7 @@ def search(
     keyword: str = typer.Argument(..., help="Search keyword"),
     field: str = typer.Option("all", "--field", "-f", help="Field to search: all, title, skills"),
     limit: int = typer.Option(20, "--limit", "-n", help="Max results"),
-    db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Database path"),
+    db_path: Optional[str] = typer.Option(None, "--db", help="Database path or PostgreSQL DSN"),
 ) -> None:
     """
     Search jobs by keyword.
@@ -508,7 +516,7 @@ def search(
         mcf search "Python" --field skills
         mcf search "Senior" --field title --limit 50
     """
-    db = _open_database(db_path, read_only=True)
+    db = _open_database(_resolve_cli_db_path(db_path), read_only=True)
 
     jobs = db.search_jobs(keyword=keyword, limit=limit)
 
@@ -539,12 +547,12 @@ def search(
 
 @app.command()
 def stats(
-    db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Database path"),
+    db_path: Optional[str] = typer.Option(None, "--db", help="Database path or PostgreSQL DSN"),
 ) -> None:
     """
     Show database statistics.
     """
-    db = _open_database(db_path, read_only=True)
+    db = _open_database(_resolve_cli_db_path(db_path), read_only=True)
     stats_data = db.get_stats()
 
     console.print("\n[bold blue]Database Statistics[/bold blue]\n")
@@ -582,7 +590,7 @@ def export(
     company: Optional[str] = typer.Option(None, "--company", "-c", help="Filter by company"),
     salary_min: Optional[int] = typer.Option(None, "--salary-min", help="Minimum salary"),
     salary_max: Optional[int] = typer.Option(None, "--salary-max", help="Maximum salary"),
-    db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Database path"),
+    db_path: Optional[str] = typer.Option(None, "--db", help="Database path or PostgreSQL DSN"),
 ) -> None:
     """
     Export jobs from database to CSV.
@@ -592,7 +600,7 @@ def export(
         mcf export high_salary.csv --salary-min 10000
         mcf export google_jobs.csv --company Google
     """
-    db = _open_database(db_path, read_only=True)
+    db = _open_database(_resolve_cli_db_path(db_path), read_only=True)
 
     count = db.export_to_csv(
         output,
@@ -611,7 +619,7 @@ def export(
 @app.command()
 def history(
     uuid: str = typer.Argument(..., help="Job UUID"),
-    db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Database path"),
+    db_path: Optional[str] = typer.Option(None, "--db", help="Database path or PostgreSQL DSN"),
 ) -> None:
     """
     Show history of changes for a job.
@@ -619,7 +627,7 @@ def history(
     Example:
         mcf history abc123-def456
     """
-    db = _open_database(db_path, read_only=True)
+    db = _open_database(_resolve_cli_db_path(db_path), read_only=True)
 
     # Get current job
     job = db.get_job(uuid)
@@ -666,12 +674,12 @@ def history(
 
 @app.command()
 def db_status(
-    db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Database path"),
+    db_path: Optional[str] = typer.Option(None, "--db", help="Database path or PostgreSQL DSN"),
 ) -> None:
     """
     Show status of scrape sessions in database.
     """
-    db = _open_database(db_path, read_only=True)
+    db = _open_database(_resolve_cli_db_path(db_path), read_only=True)
     sessions = db.get_all_sessions()
 
     if not sessions:
@@ -717,11 +725,11 @@ def migrate(
     csv_only: bool = typer.Option(False, "--csv-only", help="Only import CSV files"),
     skip_link_only: bool = typer.Option(False, "--skip-link-only", help="Skip link-only CSVs (minimal data)"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview without importing"),
-    db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Database path"),
+    db_path: Optional[str] = typer.Option(None, "--db", help="Database path or PostgreSQL DSN"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Debug logging"),
 ) -> None:
     """
-    Import legacy MCF data from JSON files and CSVs into SQLite.
+    Import legacy MCF data from JSON files and CSVs into the configured database.
 
     Processes data sources in order for best data quality:
     1. JSON files first (richest data, from data/scrape_jsons/)
@@ -735,13 +743,14 @@ def migrate(
         mcf migrate --skip-link-only   # Skip minimal data CSVs
     """
     setup_logging(verbose)
+    resolved_db_path = _resolve_cli_db_path(db_path)
 
     if dry_run:
         console.print("[bold yellow]DRY RUN[/bold yellow] - No data will be imported\n")
 
     console.print("[bold blue]MCF Legacy Data Migration[/bold blue]")
     console.print(f"Data directory: [green]{data_dir}[/green]")
-    console.print(f"Database: [green]{db_path}[/green]")
+    console.print(f"Database: [green]{resolved_db_path}[/green]")
 
     if json_only:
         console.print("Mode: JSON files only")
@@ -756,7 +765,7 @@ def migrate(
     console.print()
 
     # Get initial stats
-    db = _open_database(db_path, read_only=True)
+    db = _open_database(resolved_db_path, read_only=True)
     initial_count = db.count_jobs()
     console.print(f"Jobs in database before migration: [cyan]{initial_count:,}[/cyan]")
     console.print()
@@ -769,7 +778,7 @@ def migrate(
     ) as progress:
         task = progress.add_task("Migrating legacy data...", total=None)
 
-        migrator = MCFMigrator(db_path)
+        migrator = MCFMigrator(resolved_db_path)
         stats = migrator.migrate_all(
             data_dir=data_dir,
             json_only=json_only,
@@ -843,14 +852,15 @@ def scrape_historical(
     ),
     not_found_threshold: int = typer.Option(1000, "--not-found-threshold", help="Stop after N consecutive not-found"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview without fetching"),
-    db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Database path"),
+    db_path: Optional[str] = typer.Option(None, "--db", help="Database path or PostgreSQL DSN"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Debug logging"),
 ) -> None:
     """
     Scrape historical jobs by enumerating job IDs.
 
     This scrapes jobs from the MCF archive by generating all possible job IDs
-    (MCF-YYYY-NNNNNNN format) and fetching each one. Jobs are stored in SQLite
+    (MCF-YYYY-NNNNNNN format) and fetching each one. Jobs are stored in the
+    configured database backend
     with automatic deduplication.
 
     Examples:
@@ -860,6 +870,7 @@ def scrape_historical(
         mcf scrape-historical --resume  # Resume any incomplete session
     """
     setup_logging(verbose)
+    resolved_db_path = _resolve_cli_db_path(db_path)
 
     # Validate options
     option_count = sum([year is not None, all_years, start is not None])
@@ -897,12 +908,12 @@ def scrape_historical(
     console.print(f"Max 429 retries: {max_rate_limit_retries}")
     console.print(f"429 cooldown: {cooldown_seconds:.1f}s")
     console.print(f"Discover bounds: {'yes' if discover_bounds else 'no'}")
-    console.print(f"Database: {db_path}")
+    console.print(f"Database: {resolved_db_path}")
     console.print()
 
     async def run():
         async with HistoricalScraper(
-            db_path=db_path,
+            db_path=resolved_db_path,
             requests_per_second=rate_limit,
             not_found_threshold=not_found_threshold,
             max_rate_limit_retries=max_rate_limit_retries,
@@ -995,7 +1006,7 @@ def scrape_historical(
 
         if not dry_run:
             # Show current database stats
-            db = _open_database(db_path)
+            db = _open_database(resolved_db_path)
             total_jobs = db.count_jobs()
             console.print(f"\n[bold]Total jobs in database:[/bold] [cyan]{total_jobs:,}[/cyan]")
 
@@ -1004,7 +1015,7 @@ def scrape_historical(
 
 @app.command(name="historical-status")
 def historical_status(
-    db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Database path"),
+    db_path: Optional[str] = typer.Option(None, "--db", help="Database path or PostgreSQL DSN"),
 ) -> None:
     """
     Show status of historical scrape sessions.
@@ -1012,7 +1023,7 @@ def historical_status(
     Displays progress for each year being scraped, including jobs found,
     not found, and current sequence position.
     """
-    db = _open_database(db_path, read_only=True)
+    db = _open_database(_resolve_cli_db_path(db_path), read_only=True)
 
     # Get sessions
     sessions = db.get_all_historical_sessions()
@@ -1291,7 +1302,7 @@ def daemon_worker(
 def show_gaps(
     year: Optional[int] = typer.Option(None, "--year", "-y", help="Specific year to check"),
     all_years: bool = typer.Option(False, "--all", help="Check all years"),
-    db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Database path"),
+    db_path: Optional[str] = typer.Option(None, "--db", help="Database path or PostgreSQL DSN"),
 ) -> None:
     """
     Show gaps in scraped job sequences.
@@ -1303,7 +1314,7 @@ def show_gaps(
         mcf gaps --year 2023     # Check gaps for 2023
         mcf gaps --all           # Check all years
     """
-    db = _open_database(db_path, read_only=True)
+    db = _open_database(_resolve_cli_db_path(db_path), read_only=True)
 
     if not year and not all_years:
         console.print("[red]Error: Must specify --year or --all[/red]")
@@ -1385,7 +1396,7 @@ def retry_gaps(
         "--discover-bounds/--no-discover-bounds",
         help="Discover tighter year bounds when initializing the scraper",
     ),
-    db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Database path"),
+    db_path: Optional[str] = typer.Option(None, "--db", help="Database path or PostgreSQL DSN"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Debug logging"),
 ) -> None:
     """
@@ -1398,6 +1409,7 @@ def retry_gaps(
         mcf retry-gaps --all           # Retry all years
     """
     setup_logging(verbose)
+    resolved_db_path = _resolve_cli_db_path(db_path)
 
     if not year and not all_years:
         console.print("[red]Error: Must specify --year or --all[/red]")
@@ -1407,7 +1419,7 @@ def retry_gaps(
 
     async def run():
         async with HistoricalScraper(
-            db_path=db_path,
+            db_path=resolved_db_path,
             requests_per_second=rate_limit,
             max_rate_limit_retries=max_rate_limit_retries,
             cooldown_seconds=cooldown_seconds,
@@ -1478,7 +1490,7 @@ def retry_gaps(
 @app.command(name="attempt-stats")
 def attempt_stats(
     year: Optional[int] = typer.Option(None, "--year", "-y", help="Specific year to show"),
-    db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Database path"),
+    db_path: Optional[str] = typer.Option(None, "--db", help="Database path or PostgreSQL DSN"),
 ) -> None:
     """
     Show fetch attempt statistics.
@@ -1490,7 +1502,7 @@ def attempt_stats(
         mcf attempt-stats              # All years summary
         mcf attempt-stats --year 2023  # Specific year details
     """
-    db = _open_database(db_path, read_only=True)
+    db = _open_database(_resolve_cli_db_path(db_path), read_only=True)
 
     console.print("\n[bold blue]Fetch Attempt Statistics[/bold blue]\n")
 
@@ -1569,7 +1581,7 @@ def generate_embeddings(
         help="Build FAISS indexes after embedding generation",
     ),
     index_dir: str = typer.Option("data/embeddings", "--index-dir", help="Directory for FAISS index files"),
-    db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Path to SQLite database"),
+    db_path: Optional[str] = typer.Option(None, "--db", help="Database path or PostgreSQL DSN"),
     since: Optional[str] = typer.Option(
         None, "--since", help="Only embed jobs posted on or after this date (YYYY-MM-DD)"
     ),
@@ -1600,11 +1612,12 @@ def generate_embeddings(
     """
     setup_logging(verbose)
     since_date = _parse_since_date(since)
+    resolved_db_path = _resolve_cli_db_path(db_path)
 
     console.print("\n[bold blue]Generating Embeddings[/bold blue]")
     console.print("━" * 40)
 
-    db = _open_database(db_path)
+    db = _open_database(resolved_db_path)
     generator = _create_embedding_generator(
         backend=embedding_backend,
         onnx_model_dir=onnx_model_dir,
@@ -1612,7 +1625,7 @@ def generate_embeddings(
 
     console.print(f"Model: [green]{generator.model_name}[/green] ({generator.DIMENSION} dimensions)")
     console.print(f"Backend: [green]{generator.backend_name}[/green]")
-    console.print(f"Database: [green]{db_path}[/green]")
+    console.print(f"Database: [green]{resolved_db_path}[/green]")
     if generator.backend_name == "onnx" and generator.onnx_model_dir is not None:
         console.print(f"ONNX dir: [green]{generator.onnx_model_dir}[/green]")
     if since_date:
@@ -1820,7 +1833,7 @@ def sync_embeddings(
         help="Update FAISS indexes with new embeddings",
     ),
     index_dir: str = typer.Option("data/embeddings", "--index-dir", help="Directory for FAISS index files"),
-    db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Path to SQLite database"),
+    db_path: Optional[str] = typer.Option(None, "--db", help="Database path or PostgreSQL DSN"),
     since: Optional[str] = typer.Option(
         None, "--since", help="Only sync jobs posted on or after this date (YYYY-MM-DD)"
     ),
@@ -1850,11 +1863,12 @@ def sync_embeddings(
     """
     setup_logging(verbose)
     since_date = _parse_since_date(since)
+    resolved_db_path = _resolve_cli_db_path(db_path)
 
     console.print("\n[bold blue]Syncing Embeddings[/bold blue]")
     console.print("━" * 40)
 
-    db = _open_database(db_path)
+    db = _open_database(resolved_db_path)
     generator = _create_embedding_generator(
         backend=embedding_backend,
         onnx_model_dir=onnx_model_dir,
@@ -1967,7 +1981,7 @@ def _update_faiss_index(
 @app.command(name="embed-status")
 def embedding_status(
     index_dir: str = typer.Option("data/embeddings", "--index-dir", help="Directory for FAISS index files"),
-    db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Path to SQLite database"),
+    db_path: Optional[str] = typer.Option(None, "--db", help="Database path or PostgreSQL DSN"),
 ) -> None:
     """
     Show embedding and FAISS index status.
@@ -1977,7 +1991,7 @@ def embedding_status(
     Example:
         mcf embed-status
     """
-    db = _open_database(db_path)
+    db = _open_database(_resolve_cli_db_path(db_path))
     stats = db.get_embedding_stats()
 
     console.print("\n[bold blue]Embedding Status[/bold blue]")
@@ -2098,7 +2112,7 @@ def embedding_status(
 def upgrade_embeddings(
     model: str = typer.Argument(..., help="New model name (e.g., all-mpnet-base-v2)"),
     batch_size: int = typer.Option(32, "--batch-size", "-b", help="Jobs to process in each batch"),
-    db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Path to SQLite database"),
+    db_path: Optional[str] = typer.Option(None, "--db", help="Database path or PostgreSQL DSN"),
     embedding_backend: str = typer.Option(
         CLI_DEFAULT_EMBEDDING_BACKEND,
         "--embedding-backend",
@@ -2128,7 +2142,7 @@ def upgrade_embeddings(
     """
     setup_logging(verbose)
 
-    db = _open_database(db_path)
+    db = _open_database(_resolve_cli_db_path(db_path))
     stats = db.get_embedding_stats()
 
     current_model = stats.get("model_version") or "none"
@@ -2271,7 +2285,7 @@ def compare_embedding_backends(
     model: str = typer.Option(EmbeddingGenerator.MODEL_NAME, "--model", help="Base embedding model name"),
     onnx_model_dir: str = typer.Option(..., "--onnx-model-dir", help="Exported ONNX model directory"),
     sample_size: int = typer.Option(24, "--sample-size", help="Representative texts to compare"),
-    db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Database path for sampling/search"),
+    db_path: Optional[str] = typer.Option(None, "--db", help="Database path or PostgreSQL DSN"),
     index_dir: str = typer.Option("data/embeddings", "--index-dir", help="Torch FAISS index directory"),
     onnx_index_dir: Optional[str] = typer.Option(
         None,
@@ -2288,8 +2302,9 @@ def compare_embedding_backends(
     the existing Torch index directory and an ONNX-rebuilt index directory.
     """
     setup_logging(verbose)
+    resolved_db_path = _resolve_cli_db_path(db_path)
 
-    db = _open_database(db_path, read_only=True)
+    db = _open_database(resolved_db_path, read_only=True)
     torch_generator = _create_embedding_generator(model_name=model, backend="torch")
     onnx_generator = _create_embedding_generator(
         model_name=model,
@@ -2344,13 +2359,13 @@ def compare_embedding_backends(
 
     if onnx_index_dir:
         torch_engine = SemanticSearchEngine(
-            db_path=db_path,
+            db_path=resolved_db_path,
             index_dir=Path(index_dir),
             model_version=model,
             embedding_backend="torch",
         )
         onnx_engine = SemanticSearchEngine(
-            db_path=db_path,
+            db_path=resolved_db_path,
             index_dir=Path(onnx_index_dir),
             model_version=model,
             embedding_backend="onnx",
@@ -2394,7 +2409,7 @@ def semantic_search_cli(
     alpha: float = typer.Option(0.7, "--alpha", help="Semantic vs keyword weight (0=keyword, 1=semantic)"),
     no_expand: bool = typer.Option(False, "--no-expand", help="Disable query expansion"),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-    db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Database path"),
+    db_path: Optional[str] = typer.Option(None, "--db", help="Database path or PostgreSQL DSN"),
     index_dir: str = typer.Option("data/embeddings", "--index-dir", help="FAISS index directory"),
     embedding_backend: str = typer.Option(
         CLI_DEFAULT_EMBEDDING_BACKEND,
@@ -2423,6 +2438,7 @@ def semantic_search_cli(
         mcf search-semantic "AI engineer" --json
     """
     setup_logging(verbose)
+    resolved_db_path = _resolve_cli_db_path(db_path)
     onnx_model_dir = _resolve_cli_onnx_model_dir(
         backend=embedding_backend,
         onnx_model_dir=onnx_model_dir,
@@ -2433,7 +2449,7 @@ def semantic_search_cli(
     )
 
     engine = SemanticSearchEngine(
-        db_path,
+        resolved_db_path,
         Path(index_dir),
         embedding_backend=embedding_backend,
         onnx_model_dir=onnx_model_dir,
@@ -2541,7 +2557,7 @@ def _display_search_results(response: SearchResponse, query: str) -> None:
 def serve_api(
     host: str = typer.Option("127.0.0.1", "--host", "-H", help="Host to bind to"),
     port: int = typer.Option(8000, "--port", "-p", help="Port to bind to"),
-    db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Database path or PostgreSQL DSN"),
+    db_path: Optional[str] = typer.Option(None, "--db", help="Database path or PostgreSQL DSN"),
     index_dir: str = typer.Option("data/embeddings", "--index-dir", help="Path to FAISS indexes"),
     reload: bool = typer.Option(False, "--reload", help="Enable auto-reload for development"),
     workers: int = typer.Option(1, "--workers", "-w", help="Number of worker processes (production)"),
@@ -2595,13 +2611,14 @@ def serve_api(
         backend=embedding_backend,
         onnx_model_dir=onnx_model_dir,
     )
+    resolved_db_path = _resolve_cli_db_path(db_path)
 
     origins = [o.strip() for o in cors_origins.split(",") if o.strip()]
 
     # Check prerequisites
-    db_target = resolve_database_target(db_path)
+    db_target = resolve_database_target(resolved_db_path)
     if db_target.is_sqlite and not db_target.sqlite_path.exists():
-        console.print(f"[red]Error:[/red] Database not found: {db_path}")
+        console.print(f"[red]Error:[/red] Database not found: {resolved_db_path}")
         console.print("Run 'mcf scrape' first to populate the database.")
         raise typer.Exit(1)
 
@@ -2614,7 +2631,7 @@ def serve_api(
 
     # Display startup info
     console.print("\n[bold green]Starting MCF Semantic Search API[/bold green]")
-    console.print(f"  Database:   {db_path}")
+    console.print(f"  Database:   {resolved_db_path}")
     console.print(f"  Index dir:  {index_dir}")
     console.print(f"  Endpoint:   http://{host}:{port}")
     console.print(f"  API docs:   http://{host}:{port}/docs")
@@ -2636,9 +2653,9 @@ def serve_api(
     console.print()
 
     # Pass config via environment so uvicorn workers can pick it up
-    os.environ["MCF_DB_PATH"] = db_path
+    os.environ["MCF_DB_PATH"] = resolved_db_path
     if db_target.is_postgres:
-        os.environ["DATABASE_URL"] = db_path
+        os.environ["DATABASE_URL"] = resolved_db_path
     else:
         os.environ.pop("DATABASE_URL", None)
     os.environ["MCF_INDEX_DIR"] = index_dir
@@ -2763,7 +2780,7 @@ def run_benchmark(
     queries: int = typer.Option(100, "--queries", "-n", help="Number of benchmark queries"),
     warmup: int = typer.Option(10, "--warmup", help="Number of warmup queries"),
     embed_texts: int = typer.Option(100, "--embed-texts", help="Number of texts for embedding benchmark"),
-    db_path: str = typer.Option("data/mcf_jobs.db", "--db", help="Database path"),
+    db_path: Optional[str] = typer.Option(None, "--db", help="Database path or PostgreSQL DSN"),
     index_dir: str = typer.Option("data/embeddings", "--index-dir", help="FAISS index directory"),
     embedding_backend: str = typer.Option(
         CLI_DEFAULT_EMBEDDING_BACKEND,
@@ -2800,6 +2817,7 @@ def run_benchmark(
         backend=embedding_backend,
         onnx_model_dir=onnx_model_dir,
     )
+    resolved_db_path = _resolve_cli_db_path(db_path)
 
     cmd = [
         sys.executable,
@@ -2811,7 +2829,7 @@ def run_benchmark(
         "--embed-texts",
         str(embed_texts),
         "--db",
-        db_path,
+        resolved_db_path,
         "--index-dir",
         index_dir,
         "--embedding-backend",

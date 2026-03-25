@@ -135,8 +135,11 @@ def test_daemon_start_uses_persisted_database_target_when_db_is_omitted(monkeypa
 
     monkeypatch.setattr(cli, "_open_database", fake_open_database)
     monkeypatch.setattr(cli, "ScraperDaemon", FakeDaemon)
-    monkeypatch.setattr(cli, "resolve_database_value_from_env", lambda: None)
-    monkeypatch.setattr(cli, "read_persisted_database_target", lambda: persisted_dsn)
+    monkeypatch.setattr(
+        cli,
+        "resolve_preferred_database_value",
+        lambda db_path, include_persisted=False: persisted_dsn,
+    )
 
     result = runner.invoke(cli.app, ["daemon", "start", "--year", "2022"])
 
