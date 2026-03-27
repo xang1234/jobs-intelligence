@@ -291,19 +291,20 @@ def _executemany(conn: Any, query: str, params_seq: list[Any]) -> None:
 
 def _select_hosted_resume_progress_rows(rows: Iterable[dict[str, Any]], *, year: int) -> list[dict[str, Any]]:
     """
-    Keep only the newest in-progress historical session for the hosted year.
+    Keep only the newest historical session for the hosted year.
 
     Hosted refreshes use ``scrape-historical --resume``. They do not need the
     full local progress history, but preserving one resumable row avoids
     restarting the hosted 2026 scan from sequence 1 after the initial seed.
     """
+    from .historical_scraper import YEAR_ESTIMATES
 
     selected: dict[str, Any] | None = None
     selected_key: tuple[datetime, int, int] | None = None
 
     for raw_row in rows:
         row = dict(raw_row)
-        if int(row.get("year") or 0) != year or row.get("status") != "in_progress":
+        if int(row.get("year") or 0) != year:
             continue
         updated_at = _parse_timestamp(row.get("updated_at")) or _parse_timestamp(row.get("started_at")) or datetime.min
         current_seq = int(row.get("current_seq") or 0)
@@ -317,6 +318,15 @@ def _select_hosted_resume_progress_rows(rows: Iterable[dict[str, Any]], *, year:
         return []
 
     selected.pop("id", None)
+    if selected.get("status") != "in_progress":
+        completed_end_seq = selected.get("end_seq")
+        selected["status"] = "in_progress"
+        selected["completed_at"] = None
+        selected["end_seq"] = YEAR_ESTIMATES.get(year, 1_000_000)
+        if completed_end_seq is not None:
+            selected["current_seq"] = int(completed_end_seq)
+        else:
+            selected["current_seq"] = max(int(selected.get("current_seq") or 1) - 1, 0)
     return [selected]
 
 

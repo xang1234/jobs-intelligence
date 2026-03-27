@@ -103,7 +103,7 @@ In GitHub repository settings, add:
 
 The included workflow file is:
 
-- [neon-hosted-refresh.yml](/Users/admin/Documents/Work/MyCareersFuture/.github/workflows/neon-hosted-refresh.yml)
+- [neon-hosted-refresh.yml](../.github/workflows/neon-hosted-refresh.yml)
 
 It runs the hosted refresh sequence on a schedule and also supports manual
 dispatch.

@@ -94,13 +94,15 @@ def test_resume_never_skips_daemon_state_even_when_counts_match():
     assert _should_skip_resume_copy("daemon_state", source_count=1, target_count=1) is False
 
 
-def test_select_hosted_resume_progress_rows_keeps_latest_in_progress_for_hosted_year():
+def test_select_hosted_resume_progress_rows_promotes_latest_completed_row_for_resume():
     rows = [
         {
             "id": 1,
             "year": 2026,
             "status": "completed",
             "current_seq": 100,
+            "end_seq": 99,
+            "completed_at": "2026-03-01T00:20:00",
             "started_at": "2026-03-01T00:00:00",
             "updated_at": "2026-03-01T00:10:00",
         },
@@ -123,8 +125,10 @@ def test_select_hosted_resume_progress_rows_keeps_latest_in_progress_for_hosted_
         {
             "id": 4,
             "year": 2026,
-            "status": "in_progress",
-            "current_seq": 200,
+            "status": "completed",
+            "current_seq": 201,
+            "end_seq": 200,
+            "completed_at": "2026-03-04T00:20:00",
             "started_at": "2026-03-04T00:00:00",
             "updated_at": "2026-03-04T00:10:00",
         },
@@ -136,16 +140,49 @@ def test_select_hosted_resume_progress_rows_keeps_latest_in_progress_for_hosted_
     assert selected[0]["year"] == 2026
     assert selected[0]["status"] == "in_progress"
     assert selected[0]["current_seq"] == 200
+    assert selected[0]["end_seq"] == 250_000
+    assert selected[0]["completed_at"] is None
     assert "id" not in selected[0]
 
 
-def test_select_hosted_resume_progress_rows_returns_empty_when_no_in_progress_row_exists():
+def test_select_hosted_resume_progress_rows_keeps_latest_existing_in_progress_row():
     rows = [
         {
             "id": 1,
             "year": 2026,
             "status": "completed",
             "current_seq": 100,
+            "end_seq": 99,
+            "started_at": "2026-03-01T00:00:00",
+            "updated_at": "2026-03-01T00:10:00",
+        },
+        {
+            "id": 2,
+            "year": 2026,
+            "status": "in_progress",
+            "current_seq": 150,
+            "end_seq": 250_000,
+            "started_at": "2026-03-02T00:00:00",
+            "updated_at": "2026-03-02T00:10:00",
+        }
+    ]
+
+    selected = _select_hosted_resume_progress_rows(rows, year=2026)
+
+    assert len(selected) == 1
+    assert selected[0]["status"] == "in_progress"
+    assert selected[0]["current_seq"] == 150
+    assert selected[0]["end_seq"] == 250_000
+
+
+def test_select_hosted_resume_progress_rows_returns_empty_when_hosted_year_missing():
+    rows = [
+        {
+            "id": 1,
+            "year": 2025,
+            "status": "completed",
+            "current_seq": 100,
+            "end_seq": 99,
             "started_at": "2026-03-01T00:00:00",
             "updated_at": "2026-03-01T00:10:00",
         }
