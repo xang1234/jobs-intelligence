@@ -88,6 +88,7 @@ def test_api_serve_defaults_to_onnx(monkeypatch, temp_dir: Path):
 def test_api_serve_respects_explicit_pgvector_backend(monkeypatch):
     calls: dict[str, object] = {}
     previous_search_backend = os.environ.get("MCF_SEARCH_BACKEND")
+    previous_lean_hosted = os.environ.get("MCF_LEAN_HOSTED")
     previous_database_url = os.environ.get("DATABASE_URL")
 
     import uvicorn
@@ -123,6 +124,10 @@ def test_api_serve_respects_explicit_pgvector_backend(monkeypatch):
             os.environ.pop("MCF_SEARCH_BACKEND", None)
         else:
             os.environ["MCF_SEARCH_BACKEND"] = previous_search_backend
+        if previous_lean_hosted is None:
+            os.environ.pop("MCF_LEAN_HOSTED", None)
+        else:
+            os.environ["MCF_LEAN_HOSTED"] = previous_lean_hosted
         if previous_database_url is None:
             os.environ.pop("DATABASE_URL", None)
         else:

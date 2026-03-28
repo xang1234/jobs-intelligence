@@ -48,7 +48,7 @@ class SearchEngineCareerDeltaProvider:
         if self.engine._has_vector_index and not self.engine._degraded:
             profile_embedding = self.engine._get_query_embedding(request.profile_text)
             search_k = max(search_limit * 2, 300)
-            candidate_rows = self.engine.index_manager.search_jobs(profile_embedding, k=search_k)
+            candidate_rows = self.engine.vector_backend.search_jobs(profile_embedding, k=search_k)
         else:
             keyword_seed = " ".join(extracted_skills[:5]) or request.profile_text[:120]
             fallback = self.engine._keyword_fallback_search(
@@ -199,7 +199,8 @@ class SearchEngineCareerDeltaProvider:
         query_expander = getattr(self.engine, "query_expander", None)
         if query_expander and hasattr(query_expander, "_skill_lower_map"):
             return query_expander._skill_lower_map.get(skill.lower(), skill)
-        skill_to_idx = getattr(self.engine.index_manager, "skill_to_idx", {})
+        vector_manager = getattr(self.engine.vector_backend, "manager", None)
+        skill_to_idx = getattr(vector_manager, "skill_to_idx", {})
         for known_skill in skill_to_idx.keys():
             if known_skill.lower() == skill.lower():
                 return known_skill
