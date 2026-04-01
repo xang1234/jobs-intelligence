@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from collections import Counter, defaultdict
 from contextlib import contextmanager
@@ -251,9 +250,7 @@ class PostgresDatabase:
         if conn is None:
             conn = self._connect()
         try:
-            row = conn.execute(
-                "SELECT 1 AS available FROM pg_available_extensions WHERE name = 'vector'"
-            ).fetchone()
+            row = conn.execute("SELECT 1 AS available FROM pg_available_extensions WHERE name = 'vector'").fetchone()
             return bool(row)
         finally:
             if owns_connection:
@@ -1341,7 +1338,15 @@ class PostgresDatabase:
                 (query, query_type, result_count, latency_ms, cache_hit, degraded, filters_used)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """,
-                (query, query_type, result_count, latency_ms, cache_hit, degraded, json.dumps(filters_used) if filters_used else None),
+                (
+                    query,
+                    query_type,
+                    result_count,
+                    latency_ms,
+                    cache_hit,
+                    degraded,
+                    json.dumps(filters_used) if filters_used else None,
+                ),
             )
 
     def get_popular_queries(self, days: int = 7, limit: int = 20) -> list[dict]:
@@ -1450,7 +1455,9 @@ class PostgresDatabase:
             params.append(region)
         if keyword:
             like_pattern = f"%{keyword}%"
-            conditions.append("(LOWER(title) LIKE LOWER(%s) OR LOWER(description) LIKE LOWER(%s) OR LOWER(skills) LIKE LOWER(%s))")
+            conditions.append(
+                "(LOWER(title) LIKE LOWER(%s) OR LOWER(description) LIKE LOWER(%s) OR LOWER(skills) LIKE LOWER(%s))"
+            )
             params.extend([like_pattern, like_pattern, like_pattern])
         return conditions, params
 
@@ -1619,7 +1626,9 @@ class PostgresDatabase:
         top_skills_by_month = [
             {
                 "month": month,
-                "skills": [{"skill": skill, "job_count": count, "cluster_id": None} for skill, count in counter.most_common(5)],
+                "skills": [
+                    {"skill": skill, "job_count": count, "cluster_id": None} for skill, count in counter.most_common(5)
+                ],
             }
             for month, counter in skills_by_month.items()
         ]
@@ -1692,7 +1701,9 @@ class PostgresDatabase:
             key=lambda item: (item["momentum"], item["job_count"]),
             reverse=True,
         )[:8]
-        top_companies = sorted(company_counts.keys(), key=lambda company: sum(company_counts[company].values()), reverse=True)[:20]
+        top_companies = sorted(
+            company_counts.keys(), key=lambda company: sum(company_counts[company].values()), reverse=True
+        )[:20]
         rising_companies = sorted(
             [
                 {
@@ -1724,7 +1735,11 @@ class PostgresDatabase:
                 "label": "Monthly hiring velocity",
                 "value": market_counts.get(current_month, 0),
                 "delta": round(
-                    ((market_counts.get(current_month, 0) - market_counts.get(previous_month, 0)) / market_counts.get(previous_month, 0)) * 100,
+                    (
+                        (market_counts.get(current_month, 0) - market_counts.get(previous_month, 0))
+                        / market_counts.get(previous_month, 0)
+                    )
+                    * 100,
                     2,
                 )
                 if market_counts.get(previous_month, 0)
@@ -1770,7 +1785,10 @@ class PostgresDatabase:
         with self._connection() as conn:
             row = conn.execute(
                 """
-                SELECT COUNT(*) AS job_count, AVG(salary_annual_min) AS avg_salary_min, AVG(salary_annual_max) AS avg_salary_max
+                SELECT
+                    COUNT(*) AS job_count,
+                    AVG(salary_annual_min) AS avg_salary_min,
+                    AVG(salary_annual_max) AS avg_salary_max
                 FROM jobs
                 WHERE company_name = %s
                 """,
@@ -1786,7 +1804,11 @@ class PostgresDatabase:
         avg_salary = None
         if row["avg_salary_min"] and row["avg_salary_max"]:
             avg_salary = int((row["avg_salary_min"] + row["avg_salary_max"]) / 2)
-        return {"job_count": row["job_count"], "avg_salary": avg_salary, "top_skills": [name for name, _ in skill_counts.most_common(10)]}
+        return {
+            "job_count": row["job_count"],
+            "avg_salary": avg_salary,
+            "top_skills": [name for name, _ in skill_counts.most_common(10)],
+        }
 
     def get_all_unique_skills(self) -> list[str]:
         with self._connection() as conn:
@@ -1813,7 +1835,7 @@ class PostgresDatabase:
         with self._connection() as conn:
             rows = conn.execute(
                 f"""
-                SELECT j.company_name, {self._embedding_select_clause(column='e.embedding')}
+                SELECT j.company_name, {self._embedding_select_clause(column="e.embedding")}
                 FROM jobs j
                 JOIN embeddings e ON e.entity_id = j.uuid AND e.entity_type = 'job'
                 WHERE j.company_name IS NOT NULL AND j.company_name != ''
@@ -1866,7 +1888,9 @@ class PostgresDatabase:
 
     def count_jobs_since(self, since: date) -> int:
         with self._connection() as conn:
-            return conn.execute("SELECT COUNT(*) AS count FROM jobs WHERE posted_date >= %s", (since,)).fetchone()["count"]
+            return conn.execute("SELECT COUNT(*) AS count FROM jobs WHERE posted_date >= %s", (since,)).fetchone()[
+                "count"
+            ]
 
     def vector_search(
         self,
@@ -1899,7 +1923,7 @@ class PostgresDatabase:
                     f"""
                     SELECT entity_id, 1 - (embedding <=> %s::vector) AS score
                     FROM embeddings
-                    WHERE {' AND '.join(conditions)}
+                    WHERE {" AND ".join(conditions)}
                     ORDER BY embedding <=> %s::vector
                     LIMIT %s
                     """,

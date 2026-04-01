@@ -7,7 +7,7 @@ from src.mcf.market_stats import (
 )
 from src.mcf.models import Category
 
-from .factories import generate_metadata, generate_test_job
+from .factories import generate_metadata, generate_test_job, posted_days_ago_for_month_offset
 
 
 def _insert_job(
@@ -42,7 +42,7 @@ def test_skill_stats_align_with_existing_trend_semantics(empty_db):
         company_name="Alpha",
         skills=["Python", "SQL"],
         categories=["Information Technology"],
-        posted_days_ago=5,
+        posted_days_ago=posted_days_ago_for_month_offset(0, day=20),
         salary_min=9000,
         salary_max=12000,
     )
@@ -52,7 +52,7 @@ def test_skill_stats_align_with_existing_trend_semantics(empty_db):
         company_name="Beta",
         skills=["Python", "Airflow"],
         categories=["Information Technology"],
-        posted_days_ago=35,
+        posted_days_ago=posted_days_ago_for_month_offset(1, day=15),
         salary_min=8500,
         salary_max=11500,
     )
@@ -73,7 +73,7 @@ def test_title_family_stats_group_variants(empty_db):
         company_name="Alpha",
         skills=["Python"],
         categories=["Data Science"],
-        posted_days_ago=2,
+        posted_days_ago=posted_days_ago_for_month_offset(0, day=20),
         salary_min=10000,
         salary_max=14000,
     )
@@ -83,7 +83,7 @@ def test_title_family_stats_group_variants(empty_db):
         company_name="Beta",
         skills=["Python", "SQL"],
         categories=["Data Science"],
-        posted_days_ago=10,
+        posted_days_ago=posted_days_ago_for_month_offset(0, day=10),
         salary_min=12000,
         salary_max=16000,
     )
@@ -103,7 +103,7 @@ def test_industry_stats_emit_sparse_salary_caveat(empty_db):
         company_name="Alpha",
         skills=["AWS"],
         categories=["Information Technology"],
-        posted_days_ago=3,
+        posted_days_ago=posted_days_ago_for_month_offset(0, day=18),
         salary_min=None,
         salary_max=None,
     )
@@ -135,7 +135,7 @@ def test_cache_refreshes_after_ttl_and_invalidate(empty_db):
         company_name="Alpha",
         skills=["Python"],
         categories=["Information Technology"],
-        posted_days_ago=2,
+        posted_days_ago=posted_days_ago_for_month_offset(0, day=20),
         salary_min=9000,
         salary_max=12000,
     )
@@ -148,7 +148,7 @@ def test_cache_refreshes_after_ttl_and_invalidate(empty_db):
         company_name="Beta",
         skills=["Python"],
         categories=["Information Technology"],
-        posted_days_ago=1,
+        posted_days_ago=posted_days_ago_for_month_offset(0, day=21),
         salary_min=10000,
         salary_max=13000,
     )
@@ -172,7 +172,7 @@ def test_market_snapshot_returns_request_relevant_aggregates(empty_db):
         company_name="Alpha",
         skills=["SQL", "CRM"],
         categories=["Marketing"],
-        posted_days_ago=2,
+        posted_days_ago=posted_days_ago_for_month_offset(0, day=20),
         salary_min=10000,
         salary_max=13000,
     )
@@ -200,7 +200,7 @@ def test_market_stats_use_persisted_normalized_columns_for_aggregates(empty_db):
         company_name="Alpha",
         skills=["Python", "SQL"],
         categories=["Information Technology"],
-        posted_days_ago=2,
+        posted_days_ago=posted_days_ago_for_month_offset(0, day=20),
         salary_min=10000,
         salary_max=13000,
     )
@@ -232,7 +232,7 @@ def test_market_snapshot_preserves_company_fallback_with_missing_persisted_bucke
         company_name="Alpha",
         skills=["Python", "AWS"],
         categories=["Information Technology"],
-        posted_days_ago=2,
+        posted_days_ago=posted_days_ago_for_month_offset(0, day=20),
         salary_min=10000,
         salary_max=13000,
     )
@@ -242,7 +242,7 @@ def test_market_snapshot_preserves_company_fallback_with_missing_persisted_bucke
         company_name="Alpha",
         skills=["SQL"],
         categories=["Information Technology"],
-        posted_days_ago=5,
+        posted_days_ago=posted_days_ago_for_month_offset(0, day=15),
         salary_min=9000,
         salary_max=12000,
     )
@@ -252,7 +252,7 @@ def test_market_snapshot_preserves_company_fallback_with_missing_persisted_bucke
         company_name="Alpha",
         skills=["Kubernetes"],
         categories=["Information Technology"],
-        posted_days_ago=8,
+        posted_days_ago=posted_days_ago_for_month_offset(0, day=10),
         salary_min=11000,
         salary_max=14000,
     )

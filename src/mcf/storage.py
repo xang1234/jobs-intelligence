@@ -259,9 +259,7 @@ class JobStorage:
             with open(filepath) as f:
                 data = json.load(f)
             checkpoint = Checkpoint.model_validate(data)
-            logger.info(
-                f"Resumed from checkpoint: {checkpoint.fetched_count} jobs, " f"offset {checkpoint.current_offset}"
-            )
+            logger.info(f"Resumed from checkpoint: {checkpoint.fetched_count} jobs, offset {checkpoint.current_offset}")
             return checkpoint
         except Exception as e:
             logger.warning(f"Failed to load checkpoint: {e}")
@@ -542,8 +540,7 @@ class SQLiteStorage:
         )
 
         logger.info(
-            f"Resumed session {self._session_id}: "
-            f"{checkpoint.fetched_count} jobs, offset {checkpoint.current_offset}"
+            f"Resumed session {self._session_id}: {checkpoint.fetched_count} jobs, offset {checkpoint.current_offset}"
         )
         return checkpoint
 

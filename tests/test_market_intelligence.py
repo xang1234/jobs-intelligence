@@ -4,7 +4,7 @@ from unittest.mock import patch
 from src.mcf.database import MCFDatabase
 from src.mcf.embeddings import JobResult, SearchRequest, SearchResponse, SemanticSearchEngine
 
-from .factories import generate_metadata, generate_test_job
+from .factories import generate_metadata, generate_test_job, posted_days_ago_for_month_offset
 
 
 def _insert_job(
@@ -39,7 +39,7 @@ def test_skill_trends_bucket_by_month_and_compute_momentum(empty_db: MCFDatabase
         title="Platform Engineer",
         company_name="Alpha",
         skills=["Python", "SQL"],
-        posted_days_ago=5,
+        posted_days_ago=posted_days_ago_for_month_offset(0, day=20),
         salary_min=9000,
         salary_max=12000,
     )
@@ -48,7 +48,7 @@ def test_skill_trends_bucket_by_month_and_compute_momentum(empty_db: MCFDatabase
         title="Analytics Engineer",
         company_name="Beta",
         skills=["Python", "Airflow"],
-        posted_days_ago=35,
+        posted_days_ago=posted_days_ago_for_month_offset(1, day=15),
         salary_min=8500,
         salary_max=11500,
     )
@@ -57,7 +57,7 @@ def test_skill_trends_bucket_by_month_and_compute_momentum(empty_db: MCFDatabase
         title="Database Engineer",
         company_name="Gamma",
         skills=["SQL", "PostgreSQL"],
-        posted_days_ago=65,
+        posted_days_ago=posted_days_ago_for_month_offset(3, day=15),
         salary_min=8000,
         salary_max=10000,
     )
@@ -76,7 +76,7 @@ def test_role_trend_uses_annual_salary_median(empty_db: MCFDatabase):
         title="Data Scientist",
         company_name="Alpha",
         skills=["Python", "Machine Learning"],
-        posted_days_ago=2,
+        posted_days_ago=posted_days_ago_for_month_offset(0, day=20),
         salary_min=10000,
         salary_max=14000,
     )
@@ -85,7 +85,7 @@ def test_role_trend_uses_annual_salary_median(empty_db: MCFDatabase):
         title="Senior Data Scientist",
         company_name="Beta",
         skills=["Python", "SQL"],
-        posted_days_ago=10,
+        posted_days_ago=posted_days_ago_for_month_offset(0, day=10),
         salary_min=12000,
         salary_max=16000,
     )
@@ -104,7 +104,7 @@ def test_company_trend_top_skills_include_cluster_id(empty_db: MCFDatabase):
         title="Data Scientist",
         company_name="Insight Labs",
         skills=["Python", "SQL"],
-        posted_days_ago=2,
+        posted_days_ago=posted_days_ago_for_month_offset(0, day=20),
         salary_min=10000,
         salary_max=14000,
     )
@@ -149,7 +149,7 @@ def test_search_results_include_explanations(temp_dir: Path, empty_db: MCFDataba
         title="Machine Learning Engineer",
         company_name="Alpha",
         skills=["Python", "TensorFlow", "SQL"],
-        posted_days_ago=4,
+        posted_days_ago=posted_days_ago_for_month_offset(0, day=18),
         salary_min=11000,
         salary_max=15000,
     )
@@ -175,7 +175,7 @@ def test_profile_match_returns_fit_breakdown(temp_dir: Path, empty_db: MCFDataba
         title="Senior Data Scientist",
         company_name="Insight Labs",
         skills=["Python", "SQL", "Machine Learning"],
-        posted_days_ago=3,
+        posted_days_ago=posted_days_ago_for_month_offset(0, day=20),
         salary_min=12000,
         salary_max=16000,
     )
@@ -184,7 +184,7 @@ def test_profile_match_returns_fit_breakdown(temp_dir: Path, empty_db: MCFDataba
         title="Backend Engineer",
         company_name="Core Systems",
         skills=["Java", "Spring", "SQL"],
-        posted_days_ago=8,
+        posted_days_ago=posted_days_ago_for_month_offset(0, day=12),
         salary_min=9000,
         salary_max=12000,
     )

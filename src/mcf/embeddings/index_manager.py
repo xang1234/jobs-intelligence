@@ -214,7 +214,7 @@ class FAISSIndexManager:
 
         if len(embeddings) != len(skill_names):
             raise ValueError(
-                f"embeddings ({len(embeddings)}) and skill_names ({len(skill_names)}) " "must have same length"
+                f"embeddings ({len(embeddings)}) and skill_names ({len(skill_names)}) must have same length"
             )
 
         n_skills = len(embeddings)
@@ -606,7 +606,7 @@ class FAISSIndexManager:
             raise IndexNotBuiltError("Cannot add to unbuilt index")
 
         if len(embeddings) != len(uuids):
-            raise ValueError(f"embeddings ({len(embeddings)}) and uuids ({len(uuids)}) " "must have same length")
+            raise ValueError(f"embeddings ({len(embeddings)}) and uuids ({len(uuids)}) must have same length")
 
         # Get current max index
         current_max = max(self.idx_to_uuid.keys()) if self.idx_to_uuid else -1
@@ -645,7 +645,7 @@ class FAISSIndexManager:
                 removed_count += 1
 
         if removed_count > 0:
-            logger.warning(f"Marked {removed_count} jobs as removed. " "Call rebuild_job_index() to reclaim space.")
+            logger.warning(f"Marked {removed_count} jobs as removed. Call rebuild_job_index() to reclaim space.")
 
     # =========================================================================
     # Persistence
@@ -756,7 +756,7 @@ class FAISSIndexManager:
             saved_version = metadata.get("model_version", "unknown")
             if saved_version != self.model_version:
                 raise IndexCompatibilityError(
-                    f"Index model version '{saved_version}' doesn't match " f"current version '{self.model_version}'"
+                    f"Index model version '{saved_version}' doesn't match current version '{self.model_version}'"
                 )
 
             self._nlist = metadata.get("nlist", 0)

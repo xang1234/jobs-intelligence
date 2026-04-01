@@ -71,9 +71,7 @@ def _insert_job(
     finally:
         random.setstate(random_state)
     job.description = (
-        f"{title} role at {company_name}. "
-        f"Core skills: {', '.join(skills)}. "
-        f"Categories: {', '.join(categories)}."
+        f"{title} role at {company_name}. Core skills: {', '.join(skills)}. Categories: {', '.join(categories)}."
     )
     job.categories = [Category(category=category) for category in categories]
     job.metadata = generate_metadata(posted_days_ago=posted_days_ago)
@@ -200,9 +198,7 @@ def test_engine_integration_generates_skill_substitution_from_market_momentum(te
         provider,
         "get_related_skills",
         lambda skill, k=10: (
-            ({"skill": "Spark", "similarity": 0.91, "same_cluster": True},)
-            if skill == "Hadoop"
-            else ()
+            ({"skill": "Spark", "similarity": 0.91, "same_cluster": True},) if skill == "Hadoop" else ()
         ),
     )
 
@@ -308,9 +304,7 @@ def test_engine_integration_generates_bounded_adjacent_role_industry_pivot(temp_
     )
 
     pivot = next(
-        summary
-        for summary in response.summaries
-        if summary.scenario_type == ScenarioType.ADJACENT_ROLE_INDUSTRY_PIVOT
+        summary for summary in response.summaries if summary.scenario_type == ScenarioType.ADJACENT_ROLE_INDUSTRY_PIVOT
     )
 
     assert pivot.change is not None
@@ -390,11 +384,8 @@ def test_engine_integration_reuse_parity_matches_naive_reruns(temp_dir, empty_db
     assert [summary.scenario_id for summary in response.summaries] == [
         summary.scenario_id for summary in ranked_summaries
     ]
-    assert [
-        (scenario.scenario_type, scenario.reason_code) for scenario in response.filtered_scenarios
-    ] == [
-        (scenario.scenario_type, scenario.reason_code)
-        for scenario in tuple(filtered_scenarios + ranking_filtered)[:3]
+    assert [(scenario.scenario_type, scenario.reason_code) for scenario in response.filtered_scenarios] == [
+        (scenario.scenario_type, scenario.reason_code) for scenario in tuple(filtered_scenarios + ranking_filtered)[:3]
     ]
 
 

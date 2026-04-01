@@ -74,9 +74,7 @@ class QueryExpander:
             if acronym and len(acronym) >= 2:
                 self._acronym_map[acronym] = skill
 
-        logger.debug(
-            f"Initialized QueryExpander with {len(skill_to_cluster)} skills " f"in {len(skill_clusters)} clusters"
-        )
+        logger.debug(f"Initialized QueryExpander with {len(skill_to_cluster)} skills in {len(skill_clusters)} clusters")
 
     @classmethod
     def load(cls, index_dir: Path) -> "QueryExpander":
@@ -101,11 +99,11 @@ class QueryExpander:
         mapping_path = index_dir / "skill_to_cluster.pkl"
 
         if not clusters_path.exists():
-            raise FileNotFoundError(f"Skill clusters not found at {clusters_path}. " f"Run 'mcf embed-generate' first.")
+            raise FileNotFoundError(f"Skill clusters not found at {clusters_path}. Run 'mcf embed-generate' first.")
 
         if not mapping_path.exists():
             raise FileNotFoundError(
-                f"Skill-to-cluster mapping not found at {mapping_path}. " f"Run 'mcf embed-generate' first."
+                f"Skill-to-cluster mapping not found at {mapping_path}. Run 'mcf embed-generate' first."
             )
 
         with open(clusters_path, "rb") as f:
@@ -114,7 +112,7 @@ class QueryExpander:
         with open(mapping_path, "rb") as f:
             skill_to_cluster = pickle.load(f)
 
-        logger.info(f"Loaded skill clusters: {len(skill_to_cluster)} skills " f"in {len(skill_clusters)} clusters")
+        logger.info(f"Loaded skill clusters: {len(skill_to_cluster)} skills in {len(skill_clusters)} clusters")
 
         return cls(skill_clusters, skill_to_cluster)
 
@@ -154,9 +152,7 @@ class QueryExpander:
         result = self._deduplicate(expanded)
 
         if len(result) > len(words):
-            logger.info(
-                f"Query expansion: '{query}' -> {len(result)} terms " f"(+{len(result) - len(words)} expansions)"
-            )
+            logger.info(f"Query expansion: '{query}' -> {len(result)} terms (+{len(result) - len(words)} expansions)")
 
         return result
 

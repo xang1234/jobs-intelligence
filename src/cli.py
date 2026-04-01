@@ -48,14 +48,6 @@ from src.mcf.db_target import (
     resolve_database_target,
     resolve_preferred_database_value,
 )
-from src.mcf.hosted_slice import DEFAULT_HOSTED_SLICE_POLICY, HostedSlicePolicy
-from src.mcf.postgres_migration import (
-    audit_sqlite_source,
-    migrate_sqlite_backup_to_postgres,
-    purge_hosted_slice,
-    seed_hosted_slice_from_postgres,
-    write_migration_report,
-)
 from src.mcf.embeddings import (
     FAISSIndexManager,
     IndexCompatibilityError,
@@ -65,6 +57,14 @@ from src.mcf.embeddings import (
     default_onnx_model_dir,
     export_sentence_transformer_to_onnx,
     validate_embedding_backend_config,
+)
+from src.mcf.hosted_slice import DEFAULT_HOSTED_SLICE_POLICY, HostedSlicePolicy
+from src.mcf.postgres_migration import (
+    audit_sqlite_source,
+    migrate_sqlite_backup_to_postgres,
+    purge_hosted_slice,
+    seed_hosted_slice_from_postgres,
+    write_migration_report,
 )
 
 app = typer.Typer(
@@ -1771,8 +1771,7 @@ def _build_faiss_indexes(
             progress.update(
                 task,
                 description=(
-                    f"Building company index ({len(company_centroids):,} companies,"
-                    f" {total_centroids:,} centroids)..."
+                    f"Building company index ({len(company_centroids):,} companies, {total_centroids:,} centroids)..."
                 ),
             )
             index_manager.build_company_index(company_centroids)

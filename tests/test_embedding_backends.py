@@ -60,12 +60,9 @@ class DummyEmbeddingBackend(EmbeddingBackend):
         show_progress_bar: bool = False,
     ) -> np.ndarray:
         del batch_size, show_progress_bar
-        return np.vstack(
-            [
-                self.encode_one(text, normalize_embeddings=normalize_embeddings)
-                for text in texts
-            ]
-        ).astype(np.float32)
+        return np.vstack([self.encode_one(text, normalize_embeddings=normalize_embeddings) for text in texts]).astype(
+            np.float32
+        )
 
 
 def test_model_version_suffix_for_onnx():

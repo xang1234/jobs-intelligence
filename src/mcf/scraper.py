@@ -120,7 +120,7 @@ class MCFScraper:
             if checkpoint:
                 start_offset = checkpoint.current_offset
                 existing_uuids = set(checkpoint.job_uuids)
-                logger.info(f"Resuming from checkpoint: {checkpoint.fetched_count} jobs, " f"offset {start_offset}")
+                logger.info(f"Resuming from checkpoint: {checkpoint.fetched_count} jobs, offset {start_offset}")
 
         async with MCFClient(requests_per_second=self.requests_per_second) as client:
             # Get total job count for progress tracking
@@ -168,7 +168,7 @@ class MCFScraper:
                     )
                 except MCFRateLimitError:
                     backoff = 1.0 / self.requests_per_second + 5.0
-                    logger.warning(f"Rate limited at offset {offset}, " f"backing off {backoff:.1f}s")
+                    logger.warning(f"Rate limited at offset {offset}, backing off {backoff:.1f}s")
                     await asyncio.sleep(backoff)
                     continue
                 except MCFAPIError as e:

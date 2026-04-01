@@ -73,8 +73,7 @@ class SearchEngineCareerDeltaProvider:
                 continue
 
             title_match = bool(
-                normalized_titles
-                and any(title in (job.get("title", "").lower()) for title in normalized_titles)
+                normalized_titles and any(title in (job.get("title", "").lower()) for title in normalized_titles)
             )
 
             job_skills = tuple(self.engine._parse_skills(job.get("skills")))
@@ -116,10 +115,9 @@ class SearchEngineCareerDeltaProvider:
                     company_classifications=company_direct_industries.get(company_name, ()),
                     skills=job_skills,
                 )
-            title_family = (
-                (job.get("title_family") or "").strip()
-                or normalize_title_family(job.get("title", "")).canonical
-            )
+            title_family = (job.get("title_family") or "").strip() or normalize_title_family(
+                job.get("title", "")
+            ).canonical
 
             candidates.append(
                 CareerDeltaCandidate(

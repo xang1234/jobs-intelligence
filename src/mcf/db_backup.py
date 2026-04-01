@@ -19,7 +19,9 @@ class BackupMetadata:
     jobs_count: int
 
 
-def create_sqlite_hot_backup(source_path: str | Path, backup_dir: str | Path, *, prefix: str = "mcf_pre_postgres") -> Path:
+def create_sqlite_hot_backup(
+    source_path: str | Path, backup_dir: str | Path, *, prefix: str = "mcf_pre_postgres"
+) -> Path:
     """Create a consistent hot backup using SQLite's native backup API."""
     source = Path(source_path)
     destination_dir = Path(backup_dir)

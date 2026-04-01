@@ -72,8 +72,7 @@ def test_coerce_timestamp_fields_replaces_invalid_values_with_none():
         "VALUES (1, '2026-03-24T12:34:56', 1, 'false')"
     )
     conn.execute(
-        "INSERT INTO search_analytics (id, searched_at, cache_hit, degraded) "
-        "VALUES (2, 'bad-timestamp', 0, 'true')"
+        "INSERT INTO search_analytics (id, searched_at, cache_hit, degraded) VALUES (2, 'bad-timestamp', 0, 'true')"
     )
     rows = conn.execute("SELECT * FROM search_analytics ORDER BY id").fetchall()
 
@@ -164,7 +163,7 @@ def test_select_hosted_resume_progress_rows_keeps_latest_existing_in_progress_ro
             "end_seq": 250_000,
             "started_at": "2026-03-02T00:00:00",
             "updated_at": "2026-03-02T00:10:00",
-        }
+        },
     ]
 
     selected = _select_hosted_resume_progress_rows(rows, year=2026)

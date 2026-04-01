@@ -451,9 +451,7 @@ def export_sentence_transformer_to_onnx(
     input_names = [name for name in ("input_ids", "attention_mask", "token_type_ids") if name in example]
     wrapper = _FeatureExtractionWrapper(auto_model.eval(), input_names)
 
-    dynamic_axes = {
-        name: {0: "batch", 1: "sequence"} for name in input_names
-    }
+    dynamic_axes = {name: {0: "batch", 1: "sequence"} for name in input_names}
     dynamic_axes["last_hidden_state"] = {0: "batch", 1: "sequence"}
 
     with torch.no_grad():

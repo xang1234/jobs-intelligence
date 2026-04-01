@@ -266,8 +266,8 @@ class HistoricalScraper:
         if retry_count < self.max_rate_limit_retries:
             return True
 
-        message = f"rate_limited_after_{retry_count}_retries" f" at {new_rps:.2f} req/sec"
-        logger.warning(f"Skipping seq {sequence} for year {year} after {retry_count} 429s; " "recording for retry-gaps")
+        message = f"rate_limited_after_{retry_count}_retries at {new_rps:.2f} req/sec"
+        logger.warning(f"Skipping seq {sequence} for year {year} after {retry_count} 429s; recording for retry-gaps")
         if log_failure:
             self.batch_logger.log(year, sequence, "rate_limited", message)
         return False
@@ -457,9 +457,7 @@ class HistoricalScraper:
         current_seq = start_seq
         checkpoint_interval = 100  # Save progress every N jobs
 
-        logger.info(
-            f"Scraping year {year}: sequences {start_seq:,} to {end_seq:,}" f"{' (DRY RUN)' if dry_run else ''}"
-        )
+        logger.info(f"Scraping year {year}: sequences {start_seq:,} to {end_seq:,}{' (DRY RUN)' if dry_run else ''}")
         logger.info(f"Rate limiter: {self.rate_limiter.current_rps:.2f} req/sec")
 
         rate_limit_retries = 0
@@ -467,9 +465,7 @@ class HistoricalScraper:
             while current_seq <= end_seq:
                 # Check for early termination
                 if consecutive_not_found >= self.not_found_threshold:
-                    logger.info(
-                        f"Year {year}: {consecutive_not_found} consecutive not-found, " "assuming end of sequence"
-                    )
+                    logger.info(f"Year {year}: {consecutive_not_found} consecutive not-found, assuming end of sequence")
                     break
 
                 if dry_run:
@@ -795,8 +791,7 @@ class HistoricalScraper:
             )
 
         logger.info(
-            f"Retrying {len(sequences_to_retry):,} sequences for year {year} "
-            f"(gaps: {len(gaps)}, failed: {len(failed)})"
+            f"Retrying {len(sequences_to_retry):,} sequences for year {year} (gaps: {len(gaps)}, failed: {len(failed)})"
         )
 
         jobs_found = 0
@@ -865,9 +860,7 @@ class HistoricalScraper:
         self.batch_logger.flush()
         self._mark_progress_committed()
 
-        logger.info(
-            f"Gap retry complete for year {year}: " f"{jobs_found:,} recovered, {jobs_not_found:,} still missing"
-        )
+        logger.info(f"Gap retry complete for year {year}: {jobs_found:,} recovered, {jobs_not_found:,} still missing")
 
         return ScrapeProgress(
             year=year,

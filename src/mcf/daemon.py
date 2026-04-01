@@ -306,7 +306,7 @@ class ScraperDaemon:
 
                 if gap > self.wake_threshold:
                     logger.warning(
-                        f"Wake detected: {gap:.0f}s gap (threshold: {self.wake_threshold}s). " "Resuming scrape..."
+                        f"Wake detected: {gap:.0f}s gap (threshold: {self.wake_threshold}s). Resuming scrape..."
                     )
 
                 last_beat = now

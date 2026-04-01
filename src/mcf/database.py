@@ -327,10 +327,7 @@ class MCFDatabase:
         When a journal mode override is active, write_optimized=True
         connections skip the WAL pragma to avoid reverting the override.
         """
-        target = (
-            self._journal_mode
-            or os.environ.get("MCF_SQLITE_JOURNAL_MODE", "")
-        ).strip().lower()
+        target = (self._journal_mode or os.environ.get("MCF_SQLITE_JOURNAL_MODE", "")).strip().lower()
         if not target:
             return
 
@@ -519,9 +516,7 @@ class MCFDatabase:
                 # entries from sqlite_master and reclaim space with VACUUM.
                 logger.warning("Using writable_schema to remove corrupted FTS tables")
                 conn.execute("PRAGMA writable_schema = ON")
-                conn.execute(
-                    "DELETE FROM sqlite_master WHERE name LIKE 'jobs_fts%'"
-                )
+                conn.execute("DELETE FROM sqlite_master WHERE name LIKE 'jobs_fts%'")
                 conn.execute("PRAGMA writable_schema = OFF")
                 conn.commit()
                 # VACUUM reclaims orphaned pages from the corrupted tables.
@@ -2911,9 +2906,7 @@ class MCFDatabase:
 
         result: dict[str, list[np.ndarray]] = defaultdict(list)
         for row in rows:
-            result[row["company_name"]].append(
-                np.frombuffer(row["embedding_blob"], dtype=np.float32)
-            )
+            result[row["company_name"]].append(np.frombuffer(row["embedding_blob"], dtype=np.float32))
         return dict(result)
 
     def get_jobs_without_embeddings(

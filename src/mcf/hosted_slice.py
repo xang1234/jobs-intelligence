@@ -7,7 +7,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-
 HOSTED_MIN_YEAR_DATE = date(2026, 1, 1)
 HOSTED_MAX_AGE_DAYS = 90
 

@@ -237,6 +237,34 @@ def generate_metadata(
     )
 
 
+def posted_days_ago_for_month_offset(
+    months_back: int,
+    *,
+    day: int = 15,
+    today: Optional[date] = None,
+) -> int:
+    """Return a stable days-ago value that lands in a specific month bucket."""
+    anchor = today or date.today()
+    year = anchor.year
+    month = anchor.month - months_back
+    while month <= 0:
+        month += 12
+        year -= 1
+
+    if month == 12:
+        next_month = date(year + 1, 1, 1)
+    else:
+        next_month = date(year, month + 1, 1)
+    last_day = (next_month - timedelta(days=1)).day
+
+    target_day = min(day, last_day)
+    if months_back == 0:
+        target_day = min(target_day, anchor.day)
+
+    target_date = date(year, month, target_day)
+    return (anchor - target_date).days
+
+
 def generate_test_job(
     title: Optional[str] = None,
     company_name: Optional[str] = None,

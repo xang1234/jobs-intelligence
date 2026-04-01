@@ -266,9 +266,7 @@ class TestCareerDeltaEngine:
             search_scoring=_SearchScoringStub(pool=pool),
         )
 
-        response = CareerDeltaEngine(dependencies).analyze(
-            CareerDeltaRequest(profile_text="Vague manager summary.")
-        )
+        response = CareerDeltaEngine(dependencies).analyze(CareerDeltaRequest(profile_text="Vague manager summary."))
 
         assert response.summaries == ()
 
@@ -757,9 +755,7 @@ class TestCareerDeltaEngine:
         )
 
         pivots = [
-            summary
-            for summary in response.summaries
-            if summary.scenario_type == ScenarioType.SAME_ROLE_INDUSTRY_PIVOT
+            summary for summary in response.summaries if summary.scenario_type == ScenarioType.SAME_ROLE_INDUSTRY_PIVOT
         ]
         assert pivots
         assert pivots[0].change.source_industry == "technology/data_and_ai"
@@ -837,10 +833,7 @@ class TestCareerDeltaEngine:
             )
         )
 
-        assert all(
-            summary.scenario_type != ScenarioType.SAME_ROLE_INDUSTRY_PIVOT
-            for summary in response.summaries
-        )
+        assert all(summary.scenario_type != ScenarioType.SAME_ROLE_INDUSTRY_PIVOT for summary in response.summaries)
 
     def test_engine_generates_adjacent_role_industry_pivots_within_distance_limit(self):
         pool = CareerDeltaCandidatePool(

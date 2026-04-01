@@ -64,7 +64,9 @@ class _FakeSessionDB:
         self.next_historical_id = max(self.next_historical_id, resolved_id + 1)
         return resolved_id
 
-    def update_historical_progress(self, session_id, current_seq, jobs_found, jobs_not_found, consecutive_not_found=0, end_seq=None, conn=None):
+    def update_historical_progress(
+        self, session_id, current_seq, jobs_found, jobs_not_found, consecutive_not_found=0, end_seq=None, conn=None
+    ):
         del conn
         row = self.historical_rows[session_id]
         row["current_seq"] = current_seq

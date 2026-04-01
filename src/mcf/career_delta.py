@@ -561,11 +561,7 @@ def summarize_market_position(
 
     top_industries = _top_insights([candidate.industry_label for candidate in analysis_set])
     top_companies = _top_insights([candidate.company_name for candidate in analysis_set])
-    top_skill_gaps = _top_insights(
-        gap
-        for candidate in analysis_set[:20]
-        for gap in candidate.gap_skills
-    )
+    top_skill_gaps = _top_insights(gap for candidate in analysis_set[:20] for gap in candidate.gap_skills)
 
     skill_coverage_values = [
         len(candidate.matched_skills) / len(candidate_pool.extracted_skills)
@@ -577,13 +573,9 @@ def summarize_market_position(
     thin_market = total_candidates < 15 or reachable_jobs < 5
     notes: list[str] = []
     if thin_market:
-        notes.append(
-            "Baseline evidence is limited, so scenario confidence should be conservative."
-        )
+        notes.append("Baseline evidence is limited, so scenario confidence should be conservative.")
     if candidate_pool.degraded:
-        notes.append(
-            "Vector retrieval was unavailable, so baseline fit relies on keyword fallback relevance."
-        )
+        notes.append("Vector retrieval was unavailable, so baseline fit relies on keyword fallback relevance.")
     if (
         target_salary_min is not None
         and salary_band.median_annual is not None
@@ -638,8 +630,7 @@ def _top_insights(names) -> tuple[MarketInsight, ...]:
         return ()
     ranked = sorted(counts.items(), key=lambda item: (item[1], item[0]), reverse=True)[:5]
     return tuple(
-        MarketInsight(name=name, job_count=count, share_pct=round((count / total) * 100, 2))
-        for name, count in ranked
+        MarketInsight(name=name, job_count=count, share_pct=round((count / total) * 100, 2)) for name, count in ranked
     )
 
 
@@ -716,9 +707,7 @@ def generate_skill_scenarios(
     search_scoring: SearchScoringProvider,
 ) -> tuple[ScenarioSummary, ...]:
     """Generate bounded low-pivot skill scenarios from the baseline evidence."""
-    current_skills = _normalize_skill_inventory(
-        tuple(request.current_skills) + tuple(candidate_pool.extracted_skills)
-    )
+    current_skills = _normalize_skill_inventory(tuple(request.current_skills) + tuple(candidate_pool.extracted_skills))
     if not current_skills:
         return ()
     analysis_set = _analysis_candidates(candidate_pool)
@@ -791,7 +780,8 @@ def _generate_skill_addition_scenarios(
         )
         confidence = ScenarioConfidence(
             score=_bounded_score(
-                0.35 + (support_share * 0.35)
+                0.35
+                + (support_share * 0.35)
                 + (_positive_ratio(salary_lift_pct, 0.25) * 0.15)
                 + (_positive_ratio(market.momentum, 0.2) * 0.15)
             ),
@@ -978,9 +968,7 @@ def generate_pivot_scenarios(
     source_title_family = _resolve_source_title_family(request, analysis_set)
     current_industry_key = getattr(market_snapshot.get("current_industry"), "key", None)
     current_industry_key = (
-        current_industry_key
-        if current_industry_key and not current_industry_key.startswith("unknown/")
-        else None
+        current_industry_key if current_industry_key and not current_industry_key.startswith("unknown/") else None
     )
 
     title_summaries = _generate_title_pivot_scenarios(
@@ -1031,9 +1019,8 @@ def _generate_title_pivot_scenarios(
         current_industry_key=current_industry_key,
         analysis_set=analysis_set,
     )
-    current_title_market = (
-        market_snapshot.get("current_title_family")
-        or market_stats.get_title_family_stats(source_title_family)
+    current_title_market = market_snapshot.get("current_title_family") or market_stats.get_title_family_stats(
+        source_title_family
     )
     scored: list[tuple[float, ScenarioSummary]] = []
     for target_title_family, group in grouped.items():
@@ -1304,8 +1291,7 @@ def _generate_adjacent_role_industry_pivots(
                     scenario_type=ScenarioType.ADJACENT_ROLE_INDUSTRY_PIVOT,
                     reason_code="title_distance_too_high",
                     explanation=(
-                        f"{dominant_title or target_title_family} is not close enough "
-                        "to the current role family."
+                        f"{dominant_title or target_title_family} is not close enough to the current role family."
                     ),
                     confidence=confidence,
                     source_title_family=source_title_family,
@@ -1319,10 +1305,7 @@ def _generate_adjacent_role_industry_pivots(
                 build_filtered_scenario(
                     scenario_type=ScenarioType.ADJACENT_ROLE_INDUSTRY_PIVOT,
                     reason_code="industry_distance_too_high",
-                    explanation=(
-                        f"{target_label} is too far from the current industry for a "
-                        "low-cost adjacent pivot."
-                    ),
+                    explanation=(f"{target_label} is too far from the current industry for a low-cost adjacent pivot."),
                     confidence=confidence,
                     source_title_family=source_title_family,
                     target_title_family=target_title_family,
@@ -1375,10 +1358,7 @@ def _generate_adjacent_role_industry_pivots(
             ),
             scenario_type=ScenarioType.ADJACENT_ROLE_INDUSTRY_PIVOT,
             title=f"Move toward {dominant_title} in {target_label}",
-            summary=(
-                f"{dominant_title} appears as a bounded adjacent-role move in a "
-                "stronger nearby industry bucket."
-            ),
+            summary=(f"{dominant_title} appears as a bounded adjacent-role move in a stronger nearby industry bucket."),
             market_position=_market_position_from_signal(
                 support_share=support_share,
                 momentum=target_market.momentum,

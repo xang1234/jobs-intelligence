@@ -411,8 +411,6 @@ def _classify_from_skills(
         source=IndustrySource.SKILL_AFFINITY,
         confidence=count / len(matches),
         evidence=tuple(
-            f"skill:{skill}"
-            for skill in normalized_skills
-            if _SKILL_TO_BUCKET.get(skill) == (sector, subsector)
+            f"skill:{skill}" for skill in normalized_skills if _SKILL_TO_BUCKET.get(skill) == (sector, subsector)
         ),
     )

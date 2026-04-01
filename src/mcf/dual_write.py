@@ -6,7 +6,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 WRITE_METHODS = {
     "upsert_job",
     "populate_normalized_job_metadata",

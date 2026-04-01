@@ -199,7 +199,7 @@ class SemanticSearchEngine:
                 logger.info(f"Query expander loaded: {self.query_expander.get_stats()}")
             except FileNotFoundError:
                 logger.warning(
-                    "Skill clusters not found. Query expansion disabled. " "Run 'mcf embed-generate' to create clusters."
+                    "Skill clusters not found. Query expansion disabled. Run 'mcf embed-generate' to create clusters."
                 )
             except Exception as e:
                 logger.warning(f"Failed to load query expander: {e}")

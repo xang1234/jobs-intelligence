@@ -674,9 +674,7 @@ class TestCareerDeltaResponseModels:
         )
 
         assert [item.scenario_type for item in response.scenarios] == [CareerDeltaScenarioType.TITLE_PIVOT]
-        assert [item.scenario_type for item in response.filtered_scenarios] == [
-            CareerDeltaScenarioType.TITLE_PIVOT
-        ]
+        assert [item.scenario_type for item in response.filtered_scenarios] == [CareerDeltaScenarioType.TITLE_PIVOT]
 
     def test_scenario_detail_from_internal_maps_nested_summary_and_pivot_signal(self):
         summary = ScenarioSummary(

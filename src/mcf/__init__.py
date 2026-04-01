@@ -30,8 +30,8 @@ from .database import MCFDatabase
 from .db_backup import BackupMetadata, create_sqlite_hot_backup, verify_sqlite_backup
 from .db_factory import open_database
 from .embeddings import EmbeddingGenerator, EmbeddingStats, SkillClusterResult
-from .hosted_slice import DEFAULT_HOSTED_SLICE_POLICY, HostedSlicePolicy
 from .historical_scraper import YEAR_ESTIMATES, HistoricalScraper, ScrapeProgress
+from .hosted_slice import DEFAULT_HOSTED_SLICE_POLICY, HostedSlicePolicy
 from .market_stats import MarketAggregate, MarketStatsCache, MarketStatsSnapshot
 from .migration import LegacyJobParser, MCFMigrator, MigrationStats
 from .models import Job, JobSearchResponse

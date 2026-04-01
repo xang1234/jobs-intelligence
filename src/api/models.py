@@ -1038,16 +1038,8 @@ class CareerDeltaAnalysisResponse(BaseModel):
         analysis_time_ms: Optional[float] = None,
     ) -> "CareerDeltaAnalysisResponse":
         allowed = {item.value for item in allowed_delta_types or ()}
-        summaries = [
-            item
-            for item in internal.summaries
-            if not allowed or item.scenario_type.value in allowed
-        ]
-        filtered = [
-            item
-            for item in internal.filtered_scenarios
-            if not allowed or item.scenario_type.value in allowed
-        ]
+        summaries = [item for item in internal.summaries if not allowed or item.scenario_type.value in allowed]
+        filtered = [item for item in internal.filtered_scenarios if not allowed or item.scenario_type.value in allowed]
         return cls(
             baseline=CareerDeltaBaseline.from_internal(internal.baseline) if internal.baseline else None,
             scenarios=[CareerDeltaScenarioSummary.from_internal(item) for item in summaries],

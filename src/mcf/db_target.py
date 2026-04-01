@@ -11,7 +11,6 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-
 POSTGRES_SCHEMES = ("postgres://", "postgresql://")
 DEFAULT_DATABASE_TARGET_FILE = Path("data/default_db_target.txt")
 

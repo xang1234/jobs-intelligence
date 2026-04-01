@@ -232,12 +232,9 @@ class _TestEmbeddingBackend:
         show_progress_bar: bool = False,
     ) -> np.ndarray:
         del batch_size, show_progress_bar
-        return np.vstack(
-            [
-                self.encode_one(text, normalize_embeddings=normalize_embeddings)
-                for text in texts
-            ]
-        ).astype(np.float32)
+        return np.vstack([self.encode_one(text, normalize_embeddings=normalize_embeddings) for text in texts]).astype(
+            np.float32
+        )
 
     def encode(self, sentences, **kwargs):
         if isinstance(sentences, str):
