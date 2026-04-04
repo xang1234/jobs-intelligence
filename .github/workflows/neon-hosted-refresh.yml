@@ -13,14 +13,18 @@ jobs:
   refresh:
     name: Refresh hosted Neon slice
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 120
     permissions:
       contents: read
     env:
       NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
       ONNX_MODEL_DIR: data/models/all-MiniLM-L6-v2-onnx
+      SCRAPE_YEAR: ""
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set scrape year
+        run: echo "SCRAPE_YEAR=$(date +%Y)" >> "$GITHUB_ENV"
 
       - uses: actions/setup-python@v5
         with:
@@ -37,13 +41,14 @@ jobs:
           restore-keys: poetry-hosted-refresh-${{ runner.os }}-
 
       - name: Cache ONNX bundle
+        id: onnx-cache
         uses: actions/cache@v4
         with:
           path: data/models/all-MiniLM-L6-v2-onnx
           key: hosted-onnx-${{ runner.os }}-all-MiniLM-L6-v2-v1
 
       - name: Install dependencies
-        run: poetry install --with ml,ml_torch
+        run: poetry install --with ml
 
       - name: Validate required secrets
         run: |
@@ -53,15 +58,15 @@ jobs:
           fi
 
       - name: Export ONNX bundle if cache is cold
+        if: steps.onnx-cache.outputs.cache-hit != 'true'
         run: |
-          if [ ! -f "$ONNX_MODEL_DIR/model.onnx" ]; then
-            poetry run python -m src.cli embed-export-onnx all-MiniLM-L6-v2 --output-dir "$ONNX_MODEL_DIR"
-          fi
+          poetry install --with ml_torch
+          poetry run python -m src.cli embed-export-onnx all-MiniLM-L6-v2 --output-dir "$ONNX_MODEL_DIR"
 
-      - name: Scrape current 2026 jobs into Neon
+      - name: Scrape current year jobs into Neon
         run: |
           poetry run python -m src.cli scrape-historical \
-            --year 2026 \
+            --year "$SCRAPE_YEAR" \
             --resume \
             --db "$NEON_DATABASE_URL"
 
@@ -77,7 +82,6 @@ jobs:
         run: |
           poetry run python -m src.cli pg-purge-hosted \
             --target "$NEON_DATABASE_URL" \
-            --min-posted-date 2026-01-01 \
             --max-age-days 90
 
       - name: Verify hosted retention and embeddings
@@ -94,7 +98,10 @@ jobs:
                       SELECT COUNT(*)
                       FROM jobs
                       WHERE posted_date IS NULL
-                         OR posted_date < GREATEST(DATE '2026-01-01', CURRENT_DATE - INTERVAL '90 days')
+                         OR posted_date < GREATEST(
+                              DATE_TRUNC('year', CURRENT_DATE)::date,
+                              CURRENT_DATE - INTERVAL '90 days'
+                            )
                       """
                   )
                   old_jobs = cur.fetchone()[0]
@@ -112,3 +119,13 @@ jobs:
 
           print(f"Verified hosted slice: {job_embeddings} job embeddings, retention window enforced")
           PY
+
+      - name: Report failure
+        if: failure()
+        run: |
+          echo "::error::Neon hosted refresh failed for year $SCRAPE_YEAR. Check the logs above for details."
+          echo "## Neon Hosted Refresh Failed" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Year**: $SCRAPE_YEAR" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Run**: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Time**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> "$GITHUB_STEP_SUMMARY"

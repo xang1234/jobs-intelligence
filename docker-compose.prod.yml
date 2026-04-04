@@ -1,4 +1,6 @@
-# Production overrides for homelab deployment.
+# Production overrides for homelab (SQLite + FAISS) deployment.
+# This is NOT for Oracle + Neon hosted deployments — those use `docker run`
+# directly per docs/neon-oracle-hosted-deploy.md.
 # Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 
 services:

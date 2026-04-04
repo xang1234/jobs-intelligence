@@ -67,17 +67,17 @@ ENV MCF_DB_PATH=/app/data/mcf_jobs.db \
     MCF_INDEX_DIR=/app/data/embeddings \
     MCF_EMBEDDING_BACKEND=onnx \
     MCF_ONNX_MODEL_DIR=/opt/mcf/models/all-MiniLM-L6-v2-onnx \
-    MCF_CORS_ORIGINS=* \
     MCF_RATE_LIMIT_RPM=100 \
     MCF_SQLITE_JOURNAL_MODE=delete \
     HF_HOME=/app/.cache/huggingface
 
 EXPOSE 8000
 
-# start-period=60s: FAISS index loading takes 5-30s on startup; the
-# ONNX session/tokenizer still initialize lazily on first search.
+# start-period=120s: FAISS/pgvector index loading takes 5-30s on startup;
+# the ONNX session/tokenizer still initialize lazily on first search.
+# 120s accommodates cold starts on Oracle A1 with pgvector connections.
 # Failures during start-period don't count toward retries.
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # Single worker: each worker duplicates FAISS indexes in RAM (~2GB).
