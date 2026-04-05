@@ -10,7 +10,7 @@ Local Postgres remains the full archive and the primary source of truth. The
 hosted database is a lean serving slice that keeps only rows where:
 
 ```text
-posted_date >= max(2026-01-01, today - 90 days)
+posted_date >= max(Jan 1 of current year, today - 90 days)
 ```
 
 The hosted slice keeps only `job` embeddings. `skill` and `company` embeddings
@@ -65,13 +65,15 @@ export NEON_DATABASE_URL='postgresql://<neon-dsn>'
 poetry run python -m src.cli pg-seed-hosted \
   --source "$LOCAL_DATABASE_URL" \
   --target "$NEON_DATABASE_URL" \
-  --min-posted-date 2026-01-01 \
   --max-age-days 90
 ```
 
+The `--min-posted-date` defaults to January 1 of the current year. Override it
+only if you need a different floor.
+
 The hosted seed keeps the retained `jobs`, `job` embeddings, and one resumable
-2026 historical scrape session when one exists locally. It does not copy
-`skill` or `company` embeddings.
+historical scrape session for the current year when one exists locally. It does
+not copy `skill` or `company` embeddings.
 
 Verify the hosted contents with SQL:
 
@@ -91,7 +93,7 @@ SELECT pg_size_pretty(pg_database_size(current_database())) AS database_size;
 
 Expected shape:
 
-- only recent 2026-floor jobs are present
+- only recent jobs from the current year are present
 - only `job` rows exist in `embeddings`
 - the database size stays comfortably below Neon Free storage limits
 
@@ -113,16 +115,19 @@ dispatch.
 Each scheduled run performs:
 
 ```bash
-poetry run python -m src.cli scrape-historical --year 2026 --resume --db "$NEON_DATABASE_URL"
+YEAR=$(date +%Y)
+poetry run python -m src.cli scrape-historical --year "$YEAR" --resume --db "$NEON_DATABASE_URL"
 poetry run python -m src.cli embed-sync --db "$NEON_DATABASE_URL" --embedding-backend onnx --onnx-model-dir data/models/all-MiniLM-L6-v2-onnx --no-update-index
-poetry run python -m src.cli pg-purge-hosted --target "$NEON_DATABASE_URL" --min-posted-date 2026-01-01 --max-age-days 90
+poetry run python -m src.cli pg-purge-hosted --target "$NEON_DATABASE_URL" --max-age-days 90
 ```
 
 This is intentionally a scheduled batch job, not a daemon:
 
 - Neon does not run background processes
 - the hosted slice stays bounded because old rows are purged each run
-- `scrape-historical --resume` can continue from the hosted 2026 session state
+- `scrape-historical --resume` can continue from the hosted session state
+- the scrape year and purge cutoff are computed dynamically — no manual update
+  needed on year rollover
 
 ## 6. Create the Oracle API VM
 
@@ -139,8 +144,8 @@ for this backend and ONNX runtime.
 Allow inbound traffic on:
 
 - `22` for SSH
-- `8000` for direct API testing
-- optionally `80` and `443` if you place Nginx or Caddy in front
+- `80` and `443` for HTTPS (Caddy reverse proxy)
+- optionally `8000` for direct API testing (can be closed after Caddy is set up)
 
 ## 7. Install Docker on Oracle
 
@@ -173,18 +178,32 @@ cd jobs-intelligence
 docker build -f docker/backend.Dockerfile -t mcf-backend .
 ```
 
+Create an env file for secrets (keeps credentials out of `docker inspect` and
+process listings):
+
+```bash
+sudo mkdir -p /opt/mcf
+sudo tee /opt/mcf/.env > /dev/null <<'EOF'
+DATABASE_URL=postgresql://<neon-dsn>
+MCF_SEARCH_BACKEND=pgvector
+MCF_LEAN_HOSTED=1
+MCF_EMBEDDING_BACKEND=onnx
+MCF_CORS_ORIGINS=https://<your-frontend-origin>
+EOF
+sudo chmod 600 /opt/mcf/.env
+```
+
 Run the API against Neon:
 
 ```bash
 docker run -d \
   --name mcf-api \
   --restart unless-stopped \
+  --env-file /opt/mcf/.env \
+  --memory 3g \
+  --log-opt max-size=10m \
+  --log-opt max-file=5 \
   -p 8000:8000 \
-  -e DATABASE_URL='postgresql://<neon-dsn>' \
-  -e MCF_SEARCH_BACKEND='pgvector' \
-  -e MCF_LEAN_HOSTED='1' \
-  -e MCF_EMBEDDING_BACKEND='onnx' \
-  -e MCF_CORS_ORIGINS='https://<your-frontend-origin>' \
   mcf-backend \
   uvicorn src.api.app:app --host 0.0.0.0 --port 8000 --workers 1
 ```
@@ -194,18 +213,57 @@ Notes:
 - `MCF_ONNX_MODEL_DIR` is not required when you use the bundled backend image
 - keep `--workers 1` unless you have measured memory and CPU headroom
 - do not mount FAISS indexes on Oracle; hosted search should use `pgvector`
+- `--memory 3g` matches the resource limits in `docker-compose.prod.yml`
+- `--log-opt` prevents unbounded log growth on the small VM
+- the Dockerfile does not set a default `MCF_CORS_ORIGINS` — you must set it in
+  the env file or the API will reject cross-origin requests
 
-If you want HTTPS, put Nginx or Caddy in front of the container and proxy to
-`127.0.0.1:8000`.
+## 9. Set up HTTPS with Caddy
 
-## 9. Smoke-test the hosted API
+Install Caddy on the Oracle VM for automatic TLS via Let's Encrypt:
+
+```bash
+sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | \
+  sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | \
+  sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt-get update
+sudo apt-get install -y caddy
+```
+
+Create a Caddyfile:
+
+```bash
+sudo tee /etc/caddy/Caddyfile > /dev/null <<'EOF'
+api.yourdomain.com {
+    reverse_proxy 127.0.0.1:8000
+}
+EOF
+sudo systemctl reload caddy
+```
+
+Caddy automatically provisions and renews Let's Encrypt certificates. Point
+your DNS A record to the Oracle VM's public IP before starting Caddy.
+
+Once Caddy is active, close port `8000` in the Oracle security list — all
+traffic should go through ports 80/443.
+
+Update `MCF_CORS_ORIGINS` in `/opt/mcf/.env` to use your HTTPS domain, then
+restart the API container:
+
+```bash
+docker restart mcf-api
+```
+
+## 10. Smoke-test the hosted API
 
 From the Oracle VM or your workstation:
 
 ```bash
-curl http://<oracle-ip>:8000/health
-curl http://<oracle-ip>:8000/docs
-curl -X POST http://<oracle-ip>:8000/api/search \
+curl https://api.yourdomain.com/health
+curl https://api.yourdomain.com/docs
+curl -X POST https://api.yourdomain.com/api/search \
   -H 'Content-Type: application/json' \
   -d '{"query":"data analyst","limit":5}'
 ```
@@ -216,7 +274,23 @@ Expected results:
 - `/docs` loads the FastAPI OpenAPI UI
 - `/api/search` returns recent retained jobs from the hosted slice
 
-## 10. Ongoing operations
+## 11. Frontend deployment
+
+The frontend is a static React SPA that can be deployed independently of the
+API backend. Options:
+
+- **Static hosting** (Vercel, Netlify, Cloudflare Pages): push the
+  `src/frontend/` directory and set the build command to `npm run build`. Set
+  the API base URL via environment variable to point at the Oracle API.
+- **Oracle VM co-hosting**: build and run the frontend Docker image on the same
+  VM using `docker/frontend.Dockerfile`. Add a second Caddy site block to serve
+  the frontend on a separate subdomain.
+
+Either way, the frontend makes API calls to `/api/*` which must resolve to the
+backend. On static hosts, configure a rewrite/proxy rule. On Oracle co-hosting,
+update `docker/nginx.conf` to proxy to the backend container name or IP.
+
+## 12. Ongoing operations
 
 - Continue scraping the full archive locally. Local Postgres remains the system
   of record.
@@ -225,7 +299,7 @@ Expected results:
   close to the Free storage cap, reduce retention before the database fills up.
 - Keep Oracle focused on the API only. Do not run the scraper daemon there.
 
-## 11. Rollback
+## 13. Rollback
 
 If the hosted deployment misbehaves:
 
@@ -236,7 +310,6 @@ If the hosted deployment misbehaves:
 poetry run python -m src.cli pg-seed-hosted \
   --source "$LOCAL_DATABASE_URL" \
   --target "$NEON_DATABASE_URL" \
-  --min-posted-date 2026-01-01 \
   --max-age-days 90
 ```
 

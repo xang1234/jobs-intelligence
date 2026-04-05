@@ -576,7 +576,7 @@ def seed_hosted_slice_from_postgres(
     source = PostgresDatabase(source_dsn, read_only=True, ensure_schema=False)
     target = PostgresDatabase(target_dsn, read_only=False, ensure_schema=True)
     cutoff = policy.cutoff_date()
-    hosted_year = policy.min_posted_date.year
+    hosted_year = policy.min_posted_date.year if policy.min_posted_date else date.today().year
     _truncate_postgres_target(target)
 
     with source._connection() as source_conn, target._connection() as target_conn:
@@ -687,7 +687,7 @@ def purge_hosted_slice(*, target_dsn: str, policy: HostedSlicePolicy) -> dict[st
     """
     target = PostgresDatabase(target_dsn, read_only=False, ensure_schema=True)
     cutoff = policy.cutoff_date()
-    hosted_year = policy.min_posted_date.year
+    hosted_year = policy.min_posted_date.year if policy.min_posted_date else date.today().year
     with target._connection() as conn:
         company_deleted = conn.execute(
             "DELETE FROM embeddings WHERE entity_type IN ('skill', 'company') RETURNING 1"

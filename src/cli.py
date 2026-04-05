@@ -2731,10 +2731,10 @@ def migrate_postgres(
 def seed_hosted(
     source: str = typer.Option(..., "--source", help="Source PostgreSQL DSN"),
     target: str = typer.Option(..., "--target", help="Target PostgreSQL DSN"),
-    min_posted_date: str = typer.Option(
-        DEFAULT_HOSTED_SLICE_POLICY.min_posted_date.isoformat(),
+    min_posted_date: Optional[str] = typer.Option(
+        None,
         "--min-posted-date",
-        help="Minimum posted date to retain in the hosted slice",
+        help="Minimum posted date to retain (default: Jan 1 of current year)",
     ),
     max_age_days: int = typer.Option(
         DEFAULT_HOSTED_SLICE_POLICY.max_age_days,
@@ -2744,7 +2744,7 @@ def seed_hosted(
 ) -> None:
     """Seed a lean hosted slice from local Postgres."""
     policy = HostedSlicePolicy(
-        min_posted_date=date.fromisoformat(min_posted_date),
+        min_posted_date=date.fromisoformat(min_posted_date) if min_posted_date else None,
         max_age_days=max_age_days,
     )
     result = seed_hosted_slice_from_postgres(source_dsn=source, target_dsn=target, policy=policy)
@@ -2754,10 +2754,10 @@ def seed_hosted(
 @app.command(name="pg-purge-hosted")
 def purge_hosted(
     target: str = typer.Option(..., "--target", help="Target PostgreSQL DSN"),
-    min_posted_date: str = typer.Option(
-        DEFAULT_HOSTED_SLICE_POLICY.min_posted_date.isoformat(),
+    min_posted_date: Optional[str] = typer.Option(
+        None,
         "--min-posted-date",
-        help="Minimum posted date to retain in the hosted slice",
+        help="Minimum posted date to retain (default: Jan 1 of current year)",
     ),
     max_age_days: int = typer.Option(
         DEFAULT_HOSTED_SLICE_POLICY.max_age_days,
@@ -2767,7 +2767,7 @@ def purge_hosted(
 ) -> None:
     """Purge a hosted slice down to the lean Neon policy."""
     policy = HostedSlicePolicy(
-        min_posted_date=date.fromisoformat(min_posted_date),
+        min_posted_date=date.fromisoformat(min_posted_date) if min_posted_date else None,
         max_age_days=max_age_days,
     )
     result = purge_hosted_slice(target_dsn=target, policy=policy)
