@@ -79,7 +79,7 @@ export default function TrendSparkline({
       <svg
         ref={svgRef}
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-        className="h-20 w-full"
+        className="h-20 w-full text-[color:var(--brand)]"
         role="img"
         aria-label={
           ariaLabel ??
@@ -90,8 +90,8 @@ export default function TrendSparkline({
       >
         <defs>
           <linearGradient id={`spark-fill-${id}`} x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="rgba(15, 118, 110, 0.28)" />
-            <stop offset="100%" stopColor="rgba(15, 118, 110, 0.02)" />
+            <stop offset="0%" stopColor="currentColor" stopOpacity="0.28" />
+            <stop offset="100%" stopColor="currentColor" stopOpacity="0.02" />
           </linearGradient>
         </defs>
         <polygon fill={`url(#spark-fill-${id})`} points={areaPoints} />

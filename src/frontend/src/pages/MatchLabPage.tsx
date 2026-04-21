@@ -571,12 +571,12 @@ function WhatIfScenarioPreview({
         <div className="mt-5 rounded-[24px] border border-[color:var(--border)] bg-[color:var(--surface)] px-5 py-5">
           {detailLoading ? (
             <div className="space-y-3 animate-pulse">
-              <div className="h-4 w-40 rounded-full bg-slate-200" />
-              <div className="h-5 w-full rounded-full bg-slate-200" />
-              <div className="h-5 w-5/6 rounded-full bg-slate-200" />
+              <div className="h-4 w-40 rounded-full bg-[color:var(--surface-3)]" />
+              <div className="h-5 w-full rounded-full bg-[color:var(--surface-3)]" />
+              <div className="h-5 w-5/6 rounded-full bg-[color:var(--surface-3)]" />
               <div className="grid gap-3 md:grid-cols-2">
-                <div className="h-28 rounded-[20px] bg-slate-200" />
-                <div className="h-28 rounded-[20px] bg-slate-200" />
+                <div className="h-28 rounded-[20px] bg-[color:var(--surface-3)]" />
+                <div className="h-28 rounded-[20px] bg-[color:var(--surface-3)]" />
               </div>
             </div>
           ) : detailError ? (
@@ -758,13 +758,13 @@ function WhatIfSummaryPanel({
               key={label}
               className="animate-pulse rounded-[28px] border border-[color:var(--border)] bg-[color:var(--surface-1-alpha)] p-6"
             >
-              <div className="h-3 w-28 rounded-full bg-slate-200" />
-              <div className="mt-4 h-8 w-2/3 rounded-full bg-slate-200" />
-              <div className="mt-3 h-4 w-full rounded-full bg-slate-200" />
-              <div className="mt-2 h-4 w-5/6 rounded-full bg-slate-200" />
+              <div className="h-3 w-28 rounded-full bg-[color:var(--surface-3)]" />
+              <div className="mt-4 h-8 w-2/3 rounded-full bg-[color:var(--surface-3)]" />
+              <div className="mt-3 h-4 w-full rounded-full bg-[color:var(--surface-3)]" />
+              <div className="mt-2 h-4 w-5/6 rounded-full bg-[color:var(--surface-3)]" />
               <div className="mt-5 grid gap-3 md:grid-cols-2">
-                <div className="h-20 rounded-[20px] bg-slate-200" />
-                <div className="h-20 rounded-[20px] bg-slate-200" />
+                <div className="h-20 rounded-[20px] bg-[color:var(--surface-3)]" />
+                <div className="h-20 rounded-[20px] bg-[color:var(--surface-3)]" />
               </div>
               <p className="mt-4 text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">{label}</p>
             </div>

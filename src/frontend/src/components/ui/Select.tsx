@@ -69,7 +69,7 @@ export function Select<T extends string | number>({
           >
             <ListboxOptions
               anchor="bottom start"
-              className="z-50 mt-2 max-h-64 w-[var(--button-width)] min-w-[10rem] origin-top overflow-auto rounded-[var(--radius-lg)] border border-[color:var(--border)] bg-[color:var(--surface-1)] p-1 shadow-[var(--shadow-lg)] focus-visible:outline-none"
+              className="z-[80] mt-2 max-h-64 w-[var(--button-width)] min-w-[10rem] origin-top overflow-auto rounded-[var(--radius-lg)] border border-[color:var(--border)] bg-[color:var(--surface-1)] p-1 shadow-[var(--shadow-lg)] focus-visible:outline-none"
             >
               {clearable && value != null && (
                 <ListboxOption

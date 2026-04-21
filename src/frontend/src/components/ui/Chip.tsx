@@ -92,7 +92,7 @@ export const Chip = forwardRef<HTMLElement, ChipProps>(function Chip(
               e.stopPropagation()
               onRemove()
             }}
-            className="-mr-1 inline-flex h-4 w-4 items-center justify-center rounded-full hover:bg-black/10"
+            className="-mr-1 inline-flex h-4 w-4 items-center justify-center rounded-full transition hover:bg-[color:var(--border)]"
           >
             <XMarkIcon className="h-3 w-3" />
           </span>
