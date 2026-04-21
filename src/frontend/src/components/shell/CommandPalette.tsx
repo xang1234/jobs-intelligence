@@ -21,7 +21,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { useNavigate } from 'react-router-dom'
 import { Kbd } from '@/components/ui'
-import { useTheme } from '@/contexts/ThemeContext'
+import { useTheme } from '@/hooks/useTheme'
 
 interface CommandPaletteProps {
   open: boolean

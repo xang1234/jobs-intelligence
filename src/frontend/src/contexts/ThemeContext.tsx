@@ -1,13 +1,11 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
-import { applyTheme, readStored, resolveInitialTheme, type Theme } from '@/hooks/useTheme'
-
-interface ThemeContextValue {
-  theme: Theme
-  setTheme: (theme: Theme) => void
-  toggle: () => void
-}
-
-const ThemeContext = createContext<ThemeContextValue | null>(null)
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import {
+  applyTheme,
+  readStored,
+  resolveInitialTheme,
+  ThemeContext,
+  type Theme,
+} from '@/hooks/useTheme'
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(() => resolveInitialTheme())
@@ -42,10 +40,4 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       {children}
     </ThemeContext.Provider>
   )
-}
-
-export function useTheme(): ThemeContextValue {
-  const ctx = useContext(ThemeContext)
-  if (!ctx) throw new Error('useTheme must be used inside ThemeProvider')
-  return ctx
 }
