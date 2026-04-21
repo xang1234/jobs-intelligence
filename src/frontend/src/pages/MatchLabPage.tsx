@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import JobCard from '@/components/JobCard'
+import { toast } from '@/components/ui'
 import { analyzeCareerDelta, getCareerDeltaScenarioDetail, matchProfile } from '@/services/api'
 import { buildCareerDeltaAnalysisRequest, buildProfileMatchRequest } from '@/services/matchLab'
 import type {
@@ -27,7 +28,7 @@ type AppliedScenarioState = {
 function tabButtonClass(isActive: boolean): string {
   return isActive
     ? 'bg-[color:var(--brand)] text-white shadow-lg'
-    : 'bg-[color:var(--surface)] text-slate-600 hover:text-[color:var(--brand)]'
+    : 'bg-[color:var(--surface)] text-[color:var(--ink-muted)] hover:text-[color:var(--brand)]'
 }
 
 function formatPercent(value: number | null | undefined): string {
@@ -195,7 +196,7 @@ function SummaryMetric({
 }) {
   return (
     <div className="rounded-[20px] bg-[color:var(--surface)] px-4 py-3">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</p>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">{label}</p>
       <p className={`mt-2 text-lg font-semibold ${accent ? 'text-[color:var(--brand)]' : 'text-[color:var(--ink)]'}`}>
         {value}
       </p>
@@ -220,10 +221,10 @@ function StatePanel({
 }) {
   const toneClass =
     tone === 'danger'
-      ? 'border-rose-200 bg-rose-50 text-rose-900'
+      ? 'border-[color:var(--color-danger-500)]/30 bg-[color:var(--danger-bg)] text-[color:var(--color-danger-900)]'
       : tone === 'warning'
-        ? 'border-amber-200 bg-amber-50 text-amber-900'
-        : 'border-[color:var(--border)] bg-white/80 text-slate-700'
+        ? 'border-[color:var(--color-warning-500)]/30 bg-[color:var(--color-warning-50)] text-[color:var(--warning-fg)]'
+        : 'border-[color:var(--border)] bg-[color:var(--surface-1-alpha)] text-[color:var(--ink-muted)]'
 
   return (
     <section className={`rounded-[28px] border p-6 ${toneClass}`}>
@@ -234,7 +235,7 @@ function StatePanel({
         <button
           type="button"
           onClick={onAction}
-          className="mt-4 rounded-full border border-current px-4 py-2 text-sm font-semibold transition hover:bg-white/40"
+          className="mt-4 rounded-full border border-current px-4 py-2 text-sm font-semibold transition hover:bg-[color:var(--surface-1)]/40"
         >
           {actionLabel}
         </button>
@@ -245,14 +246,14 @@ function StatePanel({
 
 function BaselineInsightCard({ baseline }: { baseline: CareerDeltaBaseline }) {
   return (
-    <article className="rounded-[28px] border border-[color:var(--border)] bg-white/90 p-6">
+    <article className="rounded-[28px] border border-[color:var(--border)] bg-[color:var(--surface-1-alpha)] p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Market position</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">Market position</p>
           <h3 className="mt-2 text-3xl font-semibold capitalize text-[color:var(--ink)]">
             {baseline.position}
           </h3>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-[color:var(--ink-muted)]">
             {baseline.reachable_jobs.toLocaleString()} reachable roles across{' '}
             {baseline.total_candidates.toLocaleString()} considered candidates, with median fit{' '}
             {(baseline.fit_median * 100).toFixed(0)}%.
@@ -260,12 +261,12 @@ function BaselineInsightCard({ baseline }: { baseline: CareerDeltaBaseline }) {
         </div>
         <div className="flex flex-wrap gap-2">
           {baseline.thin_market ? (
-            <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
+            <span className="rounded-full bg-[color:var(--warning-bg)] px-3 py-1 text-xs font-semibold text-[color:var(--warning-fg)]">
               thin market
             </span>
           ) : null}
           {baseline.degraded ? (
-            <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
+            <span className="rounded-full bg-[color:var(--warning-bg)] px-3 py-1 text-xs font-semibold text-[color:var(--warning-fg)]">
               degraded retrieval
             </span>
           ) : null}
@@ -281,31 +282,31 @@ function BaselineInsightCard({ baseline }: { baseline: CareerDeltaBaseline }) {
 
       <div className="mt-5 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
         <div className="rounded-[24px] bg-[color:var(--surface)] px-5 py-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Salary band</p>
-          <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-slate-600">
-            <span className="rounded-full bg-white px-3 py-1 font-medium text-[color:var(--ink)]">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">Salary band</p>
+          <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-[color:var(--ink-muted)]">
+            <span className="rounded-full bg-[color:var(--surface-1)] px-3 py-1 font-medium text-[color:var(--ink)]">
               Min {formatCurrency(baseline.salary_band.min_annual)}
             </span>
-            <span className="rounded-full bg-white px-3 py-1 font-medium text-[color:var(--ink)]">
+            <span className="rounded-full bg-[color:var(--surface-1)] px-3 py-1 font-medium text-[color:var(--ink)]">
               Median {formatCurrency(baseline.salary_band.median_annual)}
             </span>
-            <span className="rounded-full bg-white px-3 py-1 font-medium text-[color:var(--ink)]">
+            <span className="rounded-full bg-[color:var(--surface-1)] px-3 py-1 font-medium text-[color:var(--ink)]">
               Max {formatCurrency(baseline.salary_band.max_annual)}
             </span>
           </div>
         </div>
 
         <div className="rounded-[24px] bg-[color:var(--surface)] px-5 py-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Baseline notes</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">Baseline notes</p>
           <div className="mt-3 flex flex-wrap gap-2">
             {baseline.notes.length ? (
               baseline.notes.map((note) => (
-                <span key={note} className="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-700">
+                <span key={note} className="rounded-full bg-[color:var(--surface-1)] px-3 py-1 text-xs font-medium text-[color:var(--ink-muted)]">
                   {note}
                 </span>
               ))
             ) : (
-              <span className="text-sm text-slate-500">No special caveats on the baseline pass.</span>
+              <span className="text-sm text-[color:var(--ink-subtle)]">No special caveats on the baseline pass.</span>
             )}
           </div>
         </div>
@@ -313,34 +314,34 @@ function BaselineInsightCard({ baseline }: { baseline: CareerDeltaBaseline }) {
 
       <div className="mt-5 grid gap-4 xl:grid-cols-2">
         <div className="rounded-[24px] bg-[color:var(--surface)] px-5 py-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Extracted skills</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">Extracted skills</p>
           <div className="mt-3 flex flex-wrap gap-2">
             {baseline.extracted_skills.length ? (
               baseline.extracted_skills.map((skill) => (
-                <span key={skill} className="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-700">
+                <span key={skill} className="rounded-full bg-[color:var(--surface-1)] px-3 py-1 text-xs font-medium text-[color:var(--ink-muted)]">
                   {skill}
                 </span>
               ))
             ) : (
-              <span className="text-sm text-slate-500">No extracted baseline skills surfaced.</span>
+              <span className="text-sm text-[color:var(--ink-subtle)]">No extracted baseline skills surfaced.</span>
             )}
           </div>
         </div>
 
         <div className="rounded-[24px] bg-[color:var(--surface)] px-5 py-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Top skill gaps</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">Top skill gaps</p>
           <div className="mt-3 space-y-2">
             {baseline.top_skill_gaps.length ? (
               baseline.top_skill_gaps.map((gap) => (
-                <div key={gap.name} className="flex items-center justify-between rounded-2xl bg-white px-4 py-3 text-sm">
+                <div key={gap.name} className="flex items-center justify-between rounded-2xl bg-[color:var(--surface-1)] px-4 py-3 text-sm">
                   <span className="font-medium text-[color:var(--ink)]">{gap.name}</span>
-                  <span className="text-slate-500">
+                  <span className="text-[color:var(--ink-subtle)]">
                     {gap.job_count} jobs · {gap.share_pct.toFixed(0)}%
                   </span>
                 </div>
               ))
             ) : (
-              <p className="text-sm text-slate-500">No recurring skill gaps surfaced in the baseline pool.</p>
+              <p className="text-sm text-[color:var(--ink-subtle)]">No recurring skill gaps surfaced in the baseline pool.</p>
             )}
           </div>
         </div>
@@ -348,37 +349,37 @@ function BaselineInsightCard({ baseline }: { baseline: CareerDeltaBaseline }) {
 
       <div className="mt-5 grid gap-4 xl:grid-cols-2">
         <div className="rounded-[24px] bg-[color:var(--surface)] px-5 py-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Top industries</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">Top industries</p>
           <div className="mt-3 space-y-2">
             {baseline.top_industries.length ? (
               baseline.top_industries.map((industry) => (
-                <div key={industry.name} className="flex items-center justify-between rounded-2xl bg-white px-4 py-3 text-sm">
+                <div key={industry.name} className="flex items-center justify-between rounded-2xl bg-[color:var(--surface-1)] px-4 py-3 text-sm">
                   <span className="font-medium text-[color:var(--ink)]">{titleCaseFromKey(industry.name)}</span>
-                  <span className="text-slate-500">
+                  <span className="text-[color:var(--ink-subtle)]">
                     {industry.job_count} jobs · {industry.share_pct.toFixed(0)}%
                   </span>
                 </div>
               ))
             ) : (
-              <p className="text-sm text-slate-500">Industry concentration is still unclear for this profile.</p>
+              <p className="text-sm text-[color:var(--ink-subtle)]">Industry concentration is still unclear for this profile.</p>
             )}
           </div>
         </div>
 
         <div className="rounded-[24px] bg-[color:var(--surface)] px-5 py-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Top companies</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">Top companies</p>
           <div className="mt-3 space-y-2">
             {baseline.top_companies.length ? (
               baseline.top_companies.map((company) => (
-                <div key={company.name} className="flex items-center justify-between rounded-2xl bg-white px-4 py-3 text-sm">
+                <div key={company.name} className="flex items-center justify-between rounded-2xl bg-[color:var(--surface-1)] px-4 py-3 text-sm">
                   <span className="font-medium text-[color:var(--ink)]">{company.name}</span>
-                  <span className="text-slate-500">
+                  <span className="text-[color:var(--ink-subtle)]">
                     {company.job_count} jobs · {company.share_pct.toFixed(0)}%
                   </span>
                 </div>
               ))
             ) : (
-              <p className="text-sm text-slate-500">No dominant employer cluster surfaced in the baseline pool.</p>
+              <p className="text-sm text-[color:var(--ink-subtle)]">No dominant employer cluster surfaced in the baseline pool.</p>
             )}
           </div>
         </div>
@@ -414,34 +415,34 @@ function WhatIfScenarioPreview({
   const changeLines = describeScenarioChange(scenario.change)
 
   return (
-    <article className="rounded-[28px] border border-[color:var(--border)] bg-white/90 p-6 shadow-[0_16px_40px_rgba(15,23,42,0.05)]">
+    <article className="rounded-[28px] border border-[color:var(--border)] bg-[color:var(--surface-1-alpha)] p-6 shadow-[0_16px_40px_rgba(15,23,42,0.05)]">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex flex-wrap items-center gap-3">
           <span className="rounded-full bg-[color:var(--brand)]/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--brand)]">
             #{index + 1}
           </span>
-          <span className="rounded-full bg-[color:var(--surface)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+          <span className="rounded-full bg-[color:var(--surface)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">
             {scenario.scenario_type.replaceAll('_', ' ')}
           </span>
-          <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">
+          <span className="rounded-full bg-[color:var(--color-success-50)] px-3 py-1 text-xs font-semibold text-[color:var(--color-success-900)]">
             {formatConfidence(scenario.confidence.score)} confidence
           </span>
         </div>
         <div className="flex flex-wrap gap-2">
           {scenario.thin_market ? (
-            <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
+            <span className="rounded-full bg-[color:var(--warning-bg)] px-3 py-1 text-xs font-semibold text-[color:var(--warning-fg)]">
               thin market
             </span>
           ) : null}
           {scenario.degraded ? (
-            <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
+            <span className="rounded-full bg-[color:var(--warning-bg)] px-3 py-1 text-xs font-semibold text-[color:var(--warning-fg)]">
               degraded
             </span>
           ) : null}
         </div>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-3 text-sm text-slate-600">
+      <div className="mt-4 flex flex-wrap items-center gap-3 text-sm text-[color:var(--ink-muted)]">
         <span>
           Market position:{' '}
           <span className="font-semibold capitalize text-[color:var(--ink)]">{scenario.market_position}</span>
@@ -459,7 +460,7 @@ function WhatIfScenarioPreview({
       </div>
 
       <h3 className="mt-3 text-lg font-semibold text-[color:var(--ink)]">{scenario.title}</h3>
-      <p className="mt-2 text-sm leading-6 text-slate-600">{scenario.summary}</p>
+      <p className="mt-2 text-sm leading-6 text-[color:var(--ink-muted)]">{scenario.summary}</p>
 
       <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <SummaryMetric label="Salary delta" value={formatRatioPercent(scenario.expected_salary_delta_pct)} accent />
@@ -476,7 +477,7 @@ function WhatIfScenarioPreview({
 
       {scenario.score_breakdown ? (
         <div className="mt-5 rounded-[24px] bg-[color:var(--surface)] px-5 py-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Score breakdown</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">Score breakdown</p>
           <div className="mt-3 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
             <SummaryMetric label="Opportunity" value={scenario.score_breakdown.opportunity.toFixed(2)} />
             <SummaryMetric label="Quality" value={scenario.score_breakdown.quality.toFixed(2)} />
@@ -490,16 +491,16 @@ function WhatIfScenarioPreview({
 
       <div className="mt-5 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
         <div className="rounded-[24px] bg-[color:var(--surface)] px-5 py-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Recommended move</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">Recommended move</p>
           <div className="mt-3 space-y-2">
             {changeLines.length ? (
               changeLines.map((line) => (
-                <p key={line} className="rounded-2xl bg-white px-4 py-3 text-sm text-slate-700">
+                <p key={line} className="rounded-2xl bg-[color:var(--surface-1)] px-4 py-3 text-sm text-[color:var(--ink-muted)]">
                   {line}
                 </p>
               ))
             ) : (
-              <p className="rounded-2xl bg-white px-4 py-3 text-sm text-slate-500">
+              <p className="rounded-2xl bg-[color:var(--surface-1)] px-4 py-3 text-sm text-[color:var(--ink-subtle)]">
                 The engine did not expose a structured change list for this scenario.
               </p>
             )}
@@ -507,25 +508,25 @@ function WhatIfScenarioPreview({
         </div>
 
         <div className="rounded-[24px] bg-[color:var(--surface)] px-5 py-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Top signal</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">Top signal</p>
           {primarySignal ? (
             <div className="mt-3 space-y-2">
-              <p className="rounded-2xl bg-white px-4 py-3 text-sm text-slate-700">
+              <p className="rounded-2xl bg-[color:var(--surface-1)] px-4 py-3 text-sm text-[color:var(--ink-muted)]">
                 {primarySignal.supporting_jobs} supporting jobs · {primarySignal.supporting_share_pct.toFixed(0)}%
                 share
               </p>
-              <p className="rounded-2xl bg-white px-4 py-3 text-sm text-slate-700">
+              <p className="rounded-2xl bg-[color:var(--surface-1)] px-4 py-3 text-sm text-[color:var(--ink-muted)]">
                 Demand momentum {formatPercent(primarySignal.market_momentum)} · Median salary{' '}
                 {formatCurrency(primarySignal.market_salary_annual_median)}
               </p>
               {primarySignal.skill ? (
-                <p className="rounded-2xl bg-white px-4 py-3 text-sm text-slate-700">
+                <p className="rounded-2xl bg-[color:var(--surface-1)] px-4 py-3 text-sm text-[color:var(--ink-muted)]">
                   Signal skill: <span className="font-medium text-[color:var(--ink)]">{primarySignal.skill}</span>
                 </p>
               ) : null}
             </div>
           ) : (
-            <p className="mt-3 rounded-2xl bg-white px-4 py-3 text-sm text-slate-500">
+            <p className="mt-3 rounded-2xl bg-[color:var(--surface-1)] px-4 py-3 text-sm text-[color:var(--ink-subtle)]">
               No primary signal was attached to this recommendation.
             </p>
           )}
@@ -533,16 +534,16 @@ function WhatIfScenarioPreview({
       </div>
 
       <div className="mt-5">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Confidence notes</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">Confidence notes</p>
         <div className="mt-3 flex flex-wrap gap-2">
           {scenario.confidence.reasons.length ? (
             scenario.confidence.reasons.map((reason) => (
-              <span key={reason} className="rounded-full bg-[color:var(--surface)] px-3 py-1 text-xs font-medium text-slate-700">
+              <span key={reason} className="rounded-full bg-[color:var(--surface)] px-3 py-1 text-xs font-medium text-[color:var(--ink-muted)]">
                 {reason}
               </span>
             ))
           ) : (
-            <span className="text-sm text-slate-500">No extra confidence notes supplied.</span>
+            <span className="text-sm text-[color:var(--ink-subtle)]">No extra confidence notes supplied.</span>
           )}
         </div>
       </div>
@@ -570,12 +571,12 @@ function WhatIfScenarioPreview({
         <div className="mt-5 rounded-[24px] border border-[color:var(--border)] bg-[color:var(--surface)] px-5 py-5">
           {detailLoading ? (
             <div className="space-y-3 animate-pulse">
-              <div className="h-4 w-40 rounded-full bg-slate-200" />
-              <div className="h-5 w-full rounded-full bg-slate-200" />
-              <div className="h-5 w-5/6 rounded-full bg-slate-200" />
+              <div className="h-4 w-40 rounded-full bg-[color:var(--surface-3)]" />
+              <div className="h-5 w-full rounded-full bg-[color:var(--surface-3)]" />
+              <div className="h-5 w-5/6 rounded-full bg-[color:var(--surface-3)]" />
               <div className="grid gap-3 md:grid-cols-2">
-                <div className="h-28 rounded-[20px] bg-slate-200" />
-                <div className="h-28 rounded-[20px] bg-slate-200" />
+                <div className="h-28 rounded-[20px] bg-[color:var(--surface-3)]" />
+                <div className="h-28 rounded-[20px] bg-[color:var(--surface-3)]" />
               </div>
             </div>
           ) : detailError ? (
@@ -590,43 +591,43 @@ function WhatIfScenarioPreview({
           ) : detail ? (
             <div className="space-y-5">
               <div className="grid gap-4 xl:grid-cols-2">
-                <div className="rounded-[20px] bg-white px-5 py-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Current angle</p>
-                  <p className="mt-3 text-sm leading-6 text-slate-700">
+                <div className="rounded-[20px] bg-[color:var(--surface-1)] px-5 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">Current angle</p>
+                  <p className="mt-3 text-sm leading-6 text-[color:var(--ink-muted)]">
                     {detail.change?.source_title_family || detail.change?.source_industry
                       ? `Current role signal: ${titleCaseFromKey(detail.change?.source_title_family)} in ${titleCaseFromKey(detail.change?.source_industry)}.`
                       : 'Current baseline is represented by your existing Match Lab inputs and market-position summary.'}
                   </p>
                 </div>
-                <div className="rounded-[20px] bg-white px-5 py-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Counterfactual angle</p>
-                  <p className="mt-3 text-sm leading-6 text-slate-700">{detail.narrative}</p>
+                <div className="rounded-[20px] bg-[color:var(--surface-1)] px-5 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">Counterfactual angle</p>
+                  <p className="mt-3 text-sm leading-6 text-[color:var(--ink-muted)]">{detail.narrative}</p>
                 </div>
               </div>
 
               <div className="grid gap-4 xl:grid-cols-2">
-                <div className="rounded-[20px] bg-white px-5 py-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Evidence</p>
+                <div className="rounded-[20px] bg-[color:var(--surface-1)] px-5 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">Evidence</p>
                   <div className="mt-3 space-y-2">
                     {detail.evidence.length ? (
                       detail.evidence.map((item) => (
-                        <p key={item} className="rounded-2xl bg-[color:var(--surface)] px-4 py-3 text-sm text-slate-700">
+                        <p key={item} className="rounded-2xl bg-[color:var(--surface)] px-4 py-3 text-sm text-[color:var(--ink-muted)]">
                           {item}
                         </p>
                       ))
                     ) : (
-                      <p className="text-sm text-slate-500">No extra evidence was attached to this scenario.</p>
+                      <p className="text-sm text-[color:var(--ink-subtle)]">No extra evidence was attached to this scenario.</p>
                     )}
                   </div>
                 </div>
 
-                <div className="rounded-[20px] bg-white px-5 py-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Signals and skill gaps</p>
+                <div className="rounded-[20px] bg-[color:var(--surface-1)] px-5 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">Signals and skill gaps</p>
                   <div className="mt-3 space-y-2">
                     {detail.signals.map((signal, signalIndex) => (
                       <p
                         key={`${detail.scenario_id}-${signalIndex}`}
-                        className="rounded-2xl bg-[color:var(--surface)] px-4 py-3 text-sm text-slate-700"
+                        className="rounded-2xl bg-[color:var(--surface)] px-4 py-3 text-sm text-[color:var(--ink-muted)]"
                       >
                         {signal.supporting_jobs} jobs support this move with {signal.supporting_share_pct.toFixed(0)}%
                         share, fit median {signal.fit_median != null ? `${(signal.fit_median * 100).toFixed(0)}%` : 'n/a'},
@@ -634,7 +635,7 @@ function WhatIfScenarioPreview({
                       </p>
                     ))}
                     {detail.missing_skills.length ? (
-                      <p className="rounded-2xl bg-[color:var(--surface)] px-4 py-3 text-sm text-slate-700">
+                      <p className="rounded-2xl bg-[color:var(--surface)] px-4 py-3 text-sm text-[color:var(--ink-muted)]">
                         Missing skills to validate: {compactList(detail.missing_skills, '')}
                       </p>
                     ) : null}
@@ -643,34 +644,34 @@ function WhatIfScenarioPreview({
               </div>
 
               <div className="grid gap-4 xl:grid-cols-2">
-                <div className="rounded-[20px] bg-white px-5 py-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Tradeoffs</p>
+                <div className="rounded-[20px] bg-[color:var(--surface-1)] px-5 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">Tradeoffs</p>
                   <div className="mt-3 space-y-2">
                     {detailTradeoffs(detail).length ? (
                       detailTradeoffs(detail).map((item) => (
-                        <p key={item} className="rounded-2xl bg-[color:var(--surface)] px-4 py-3 text-sm text-slate-700">
+                        <p key={item} className="rounded-2xl bg-[color:var(--surface)] px-4 py-3 text-sm text-[color:var(--ink-muted)]">
                           {item}
                         </p>
                       ))
                     ) : (
-                      <p className="rounded-2xl bg-[color:var(--surface)] px-4 py-3 text-sm text-slate-500">
+                      <p className="rounded-2xl bg-[color:var(--surface)] px-4 py-3 text-sm text-[color:var(--ink-subtle)]">
                         No extra risks were attached beyond the baseline confidence notes.
                       </p>
                     )}
                   </div>
                 </div>
 
-                <div className="rounded-[20px] bg-white px-5 py-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Suggested search probes</p>
+                <div className="rounded-[20px] bg-[color:var(--surface-1)] px-5 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">Suggested search probes</p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {detail.search_queries.length ? (
                       detail.search_queries.map((query) => (
-                        <span key={query} className="rounded-full bg-[color:var(--surface)] px-3 py-1 text-xs font-medium text-slate-700">
+                        <span key={query} className="rounded-full bg-[color:var(--surface)] px-3 py-1 text-xs font-medium text-[color:var(--ink-muted)]">
                           {query}
                         </span>
                       ))
                     ) : (
-                      <span className="text-sm text-slate-500">No extra search probes were generated.</span>
+                      <span className="text-sm text-[color:var(--ink-subtle)]">No extra search probes were generated.</span>
                     )}
                   </div>
                 </div>
@@ -685,26 +686,26 @@ function WhatIfScenarioPreview({
 
 function FilteredScenariosPanel({ filtered }: { filtered: CareerDeltaFilteredScenario[] }) {
   return (
-    <section className="rounded-[28px] border border-dashed border-[color:var(--border)] bg-white/75 p-6">
+    <section className="rounded-[28px] border border-dashed border-[color:var(--border)] bg-[color:var(--surface-1-alpha)] p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Filtered scenarios</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">Filtered scenarios</p>
           <h3 className="mt-2 text-xl font-semibold text-[color:var(--ink)]">Rejected moves the engine considered</h3>
         </div>
-        <span className="rounded-full bg-[color:var(--surface)] px-3 py-1 text-xs font-semibold text-slate-600">
+        <span className="rounded-full bg-[color:var(--surface)] px-3 py-1 text-xs font-semibold text-[color:var(--ink-muted)]">
           {filtered.length} filtered
         </span>
       </div>
 
       <div className="mt-4 space-y-3">
         {filtered.map((scenario) => (
-          <article key={scenario.scenario_id} className="rounded-[22px] border border-[color:var(--border)] bg-white px-5 py-4">
-            <div className="flex flex-wrap items-center gap-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+          <article key={scenario.scenario_id} className="rounded-[22px] border border-[color:var(--border)] bg-[color:var(--surface-1)] px-5 py-4">
+            <div className="flex flex-wrap items-center gap-3 text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">
               <span>{scenario.scenario_type.replaceAll('_', ' ')}</span>
               <span>{scenario.reason_code.replaceAll('_', ' ')}</span>
               <span>{formatConfidence(scenario.confidence.score)} confidence</span>
             </div>
-            <p className="mt-3 text-sm leading-6 text-slate-700">{scenario.explanation}</p>
+            <p className="mt-3 text-sm leading-6 text-[color:var(--ink-muted)]">{scenario.explanation}</p>
           </article>
         ))}
       </div>
@@ -755,17 +756,17 @@ function WhatIfSummaryPanel({
           {['Baseline market position', 'Recommendation ranking'].map((label) => (
             <div
               key={label}
-              className="animate-pulse rounded-[28px] border border-[color:var(--border)] bg-white/70 p-6"
+              className="animate-pulse rounded-[28px] border border-[color:var(--border)] bg-[color:var(--surface-1-alpha)] p-6"
             >
-              <div className="h-3 w-28 rounded-full bg-slate-200" />
-              <div className="mt-4 h-8 w-2/3 rounded-full bg-slate-200" />
-              <div className="mt-3 h-4 w-full rounded-full bg-slate-200" />
-              <div className="mt-2 h-4 w-5/6 rounded-full bg-slate-200" />
+              <div className="h-3 w-28 rounded-full bg-[color:var(--surface-3)]" />
+              <div className="mt-4 h-8 w-2/3 rounded-full bg-[color:var(--surface-3)]" />
+              <div className="mt-3 h-4 w-full rounded-full bg-[color:var(--surface-3)]" />
+              <div className="mt-2 h-4 w-5/6 rounded-full bg-[color:var(--surface-3)]" />
               <div className="mt-5 grid gap-3 md:grid-cols-2">
-                <div className="h-20 rounded-[20px] bg-slate-200" />
-                <div className="h-20 rounded-[20px] bg-slate-200" />
+                <div className="h-20 rounded-[20px] bg-[color:var(--surface-3)]" />
+                <div className="h-20 rounded-[20px] bg-[color:var(--surface-3)]" />
               </div>
-              <p className="mt-4 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{label}</p>
+              <p className="mt-4 text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">{label}</p>
             </div>
           ))}
         </div>
@@ -821,8 +822,8 @@ function WhatIfSummaryPanel({
         />
       ) : null}
 
-      <div className="rounded-[28px] border border-[color:var(--border)] bg-white/90 p-6">
-        <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
+      <div className="rounded-[28px] border border-[color:var(--border)] bg-[color:var(--surface-1-alpha)] p-6">
+        <div className="flex flex-wrap items-center gap-3 text-sm text-[color:var(--ink-muted)]">
           <span>
             Scenario count:{' '}
             <span className="font-semibold text-[color:var(--ink)]">{resolvedResponse.scenarios.length}</span>
@@ -838,12 +839,12 @@ function WhatIfSummaryPanel({
             </span>
           </span>
           {resolvedResponse.thin_market ? (
-            <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
+            <span className="rounded-full bg-[color:var(--warning-bg)] px-3 py-1 text-xs font-semibold text-[color:var(--warning-fg)]">
               thin market
             </span>
           ) : null}
           {resolvedResponse.degraded ? (
-            <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
+            <span className="rounded-full bg-[color:var(--warning-bg)] px-3 py-1 text-xs font-semibold text-[color:var(--warning-fg)]">
               degraded retrieval
             </span>
           ) : null}
@@ -865,7 +866,7 @@ function WhatIfSummaryPanel({
 
       <section className="space-y-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Ranked scenarios</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">Ranked scenarios</p>
           <h3 className="mt-2 text-2xl font-semibold text-[color:var(--ink)]">Recommended moves with market evidence</h3>
         </div>
 
@@ -886,7 +887,7 @@ function WhatIfSummaryPanel({
             />
           ))
         ) : (
-          <div className="rounded-[28px] border border-dashed border-[color:var(--border)] bg-white/70 p-10 text-center text-sm text-slate-500">
+          <div className="rounded-[28px] border border-dashed border-[color:var(--border)] bg-[color:var(--surface-1-alpha)] p-10 text-center text-sm text-[color:var(--ink-subtle)]">
             {resolvedResponse.thin_market
               ? 'Recommendations are withheld because the reachable pool is too thin to support a trustworthy move.'
               : 'No recommendation cleared the quality bar for this profile. Use the baseline and filtered scenarios below to see why the engine stayed conservative.'}
@@ -916,6 +917,10 @@ export default function MatchLabPage() {
   const [detailErrors, setDetailErrors] = useState<Record<string, string>>({})
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null)
   const [appliedScenario, setAppliedScenario] = useState<AppliedScenarioState | null>(null)
+  const appliedScenarioRef = useRef<AppliedScenarioState | null>(null)
+  useEffect(() => {
+    appliedScenarioRef.current = appliedScenario
+  }, [appliedScenario])
 
   const updateInputs = (updater: (current: MatchLabSharedInputs) => MatchLabSharedInputs) => {
     setInputs((current) => {
@@ -1010,39 +1015,55 @@ export default function MatchLabPage() {
     setInputs(applied.nextInputs)
     setAppliedScenario(applied)
     runCurrentMatch(applied.nextInputs)
+    toast.success('Scenario applied', {
+      description: applied.title,
+      action: {
+        label: 'Undo',
+        onClick: () => {
+          if (appliedScenarioRef.current !== applied) return
+          setInputs(applied.previousInputs)
+          setAppliedScenario(null)
+          runCurrentMatch(applied.previousInputs)
+        },
+      },
+    })
   }
 
   const resetAppliedScenario = () => {
     if (!appliedScenario) {
       return
     }
-    setInputs(appliedScenario.previousInputs)
+    const previous = appliedScenario
+    setInputs(previous.previousInputs)
     setAppliedScenario(null)
-    runCurrentMatch(appliedScenario.previousInputs)
+    runCurrentMatch(previous.previousInputs)
+    toast('Scenario reverted', {
+      description: previous.title,
+    })
   }
 
   return (
     <div className="space-y-8">
-      <section className="rounded-[32px] border border-[color:var(--border)] bg-white/90 p-8 shadow-[0_24px_80px_rgba(15,23,42,0.08)]">
-        <p className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-500">Match lab</p>
+      <section className="rounded-[32px] border border-[color:var(--border)] bg-[color:var(--surface-1-alpha)] p-8 shadow-[0_24px_80px_rgba(15,23,42,0.08)]">
+        <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[color:var(--ink-subtle)]">Match lab</p>
         <h1 className="mt-2 text-4xl font-semibold tracking-tight text-[color:var(--ink)]">
           Paste a profile and inspect both current fit and improvement paths.
         </h1>
-        <p className="mt-3 max-w-3xl text-base leading-7 text-slate-600">
+        <p className="mt-3 max-w-3xl text-base leading-7 text-[color:var(--ink-muted)]">
           Stay in one workflow: score what fits now, then switch into What If to see how the same
           profile could move toward stronger scenarios without re-entering the context.
         </p>
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
-        <article className="rounded-[28px] border border-[color:var(--border)] bg-white/90 p-6">
+        <article className="rounded-[28px] border border-[color:var(--border)] bg-[color:var(--surface-1-alpha)] p-6">
           <label className="block text-sm font-semibold text-[color:var(--ink)]">
             Candidate profile or resume text
             <textarea
               value={inputs.profileText}
               onChange={(event) => updateInputs((current) => ({ ...current, profileText: event.target.value }))}
               rows={12}
-              className="mt-3 block w-full rounded-[24px] border border-[color:var(--border)] bg-[color:var(--surface)] px-4 py-4 text-sm leading-6 text-slate-700"
+              className="mt-3 block w-full rounded-[24px] border border-[color:var(--border)] bg-[color:var(--surface)] px-4 py-4 text-sm leading-6 text-[color:var(--ink-muted)]"
             />
           </label>
 
@@ -1058,14 +1079,14 @@ export default function MatchLabPage() {
                 <button
                   type="button"
                   onClick={resetAppliedScenario}
-                  className="rounded-full border border-[color:var(--brand)] px-4 py-2 text-sm font-semibold text-[color:var(--brand)] transition hover:bg-white"
+                  className="rounded-full border border-[color:var(--brand)] px-4 py-2 text-sm font-semibold text-[color:var(--brand)] transition hover:bg-[color:var(--surface-1)]"
                 >
                   Revert changes
                 </button>
               </div>
               <div className="mt-3 space-y-2">
                 {appliedScenario.changes.map((change) => (
-                  <p key={change} className="rounded-2xl bg-white px-4 py-3 text-sm text-slate-700">
+                  <p key={change} className="rounded-2xl bg-[color:var(--surface-1)] px-4 py-3 text-sm text-[color:var(--ink-muted)]">
                     {change}
                   </p>
                 ))}
@@ -1074,7 +1095,7 @@ export default function MatchLabPage() {
           ) : null}
 
           <div className="mt-5 grid gap-4 md:grid-cols-2">
-            <label className="text-sm text-slate-600">
+            <label className="text-sm text-[color:var(--ink-muted)]">
               Target titles
               <input
                 value={inputs.targetTitles}
@@ -1083,7 +1104,7 @@ export default function MatchLabPage() {
                 className="mt-1 block w-full rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] px-4 py-3"
               />
             </label>
-            <label className="text-sm text-slate-600">
+            <label className="text-sm text-[color:var(--ink-muted)]">
               Salary expectation (annual)
               <input
                 value={inputs.salaryExpectation}
@@ -1095,7 +1116,7 @@ export default function MatchLabPage() {
                 className="mt-1 block w-full rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] px-4 py-3"
               />
             </label>
-            <label className="text-sm text-slate-600">
+            <label className="text-sm text-[color:var(--ink-muted)]">
               Employment type
               <input
                 value={inputs.employmentType}
@@ -1104,7 +1125,7 @@ export default function MatchLabPage() {
                 className="mt-1 block w-full rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] px-4 py-3"
               />
             </label>
-            <label className="text-sm text-slate-600">
+            <label className="text-sm text-[color:var(--ink-muted)]">
               Region
               <input
                 value={inputs.region}
@@ -1128,7 +1149,7 @@ export default function MatchLabPage() {
               type="button"
               onClick={() => runWhatIf()}
               disabled={anyPending || !inputsReady}
-              className="rounded-full border border-[color:var(--brand)] bg-white px-5 py-3 text-sm font-semibold text-[color:var(--brand)] transition hover:bg-[color:var(--surface)] disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-full border border-[color:var(--brand)] bg-[color:var(--surface-1)] px-5 py-3 text-sm font-semibold text-[color:var(--brand)] transition hover:bg-[color:var(--surface)] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {whatIfMutation.isPending ? 'Running What If...' : 'Run What If'}
             </button>
@@ -1136,10 +1157,10 @@ export default function MatchLabPage() {
         </article>
 
         <article className="space-y-5">
-          <div className="rounded-[28px] border border-[color:var(--border)] bg-white/90 p-6">
+          <div className="rounded-[28px] border border-[color:var(--border)] bg-[color:var(--surface-1-alpha)] p-6">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Result shell</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">Result shell</p>
                 <h2 className="mt-2 text-2xl font-semibold text-[color:var(--ink)]">
                   One profile, two analysis modes.
                 </h2>
@@ -1162,7 +1183,7 @@ export default function MatchLabPage() {
               </div>
             </div>
 
-            <div className="mt-5 flex flex-wrap items-center gap-3 text-sm text-slate-600">
+            <div className="mt-5 flex flex-wrap items-center gap-3 text-sm text-[color:var(--ink-muted)]">
               <span>
                 Shared profile context:{' '}
                 <span className="font-semibold text-[color:var(--ink)]">
@@ -1174,8 +1195,8 @@ export default function MatchLabPage() {
 
           {activeTab === 'match' ? (
             <>
-              <div className="rounded-[28px] border border-[color:var(--border)] bg-white/90 p-6">
-                <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
+              <div className="rounded-[28px] border border-[color:var(--border)] bg-[color:var(--surface-1-alpha)] p-6">
+                <div className="flex flex-wrap items-center gap-3 text-sm text-[color:var(--ink-muted)]">
                   <span>
                     Candidates scanned:{' '}
                     <span className="font-semibold text-[color:var(--ink)]">
@@ -1184,30 +1205,30 @@ export default function MatchLabPage() {
                   </span>
                   <span>{matchMutation.data ? `${matchMutation.data.search_time_ms.toFixed(0)}ms` : null}</span>
                   {matchMutation.data?.degraded ? (
-                    <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
+                    <span className="rounded-full bg-[color:var(--warning-bg)] px-3 py-1 text-xs font-semibold text-[color:var(--warning-fg)]">
                       degraded retrieval
                     </span>
                   ) : null}
                 </div>
 
                 <div className="mt-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Extracted skills</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">Extracted skills</p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {matchMutation.data?.extracted_skills.length ? (
                       matchMutation.data.extracted_skills.map((skill) => (
-                        <span key={skill} className="rounded-full bg-[color:var(--surface)] px-3 py-1 text-xs font-medium text-slate-700">
+                        <span key={skill} className="rounded-full bg-[color:var(--surface)] px-3 py-1 text-xs font-medium text-[color:var(--ink-muted)]">
                           {skill}
                         </span>
                       ))
                     ) : (
-                      <span className="text-sm text-slate-500">Run a profile match to inspect extracted skills.</span>
+                      <span className="text-sm text-[color:var(--ink-subtle)]">Run a profile match to inspect extracted skills.</span>
                     )}
                   </div>
                 </div>
               </div>
 
               {matchMutation.error ? (
-                <div className="rounded-[24px] border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-900">
+                <div className="rounded-[24px] border border-[color:var(--color-danger-500)]/30 bg-[color:var(--danger-bg)] px-5 py-4 text-sm text-[color:var(--color-danger-900)]">
                   {matchMutation.error instanceof Error ? matchMutation.error.message : 'Current match request failed.'}
                 </div>
               ) : null}
@@ -1216,7 +1237,7 @@ export default function MatchLabPage() {
                 {matchMutation.data?.results.length ? (
                   matchMutation.data.results.map((job) => <JobCard key={job.uuid} job={job} />)
                 ) : (
-                  <div className="rounded-[28px] border border-dashed border-[color:var(--border)] bg-white/70 p-10 text-center text-sm text-slate-500">
+                  <div className="rounded-[28px] border border-dashed border-[color:var(--border)] bg-[color:var(--surface-1-alpha)] p-10 text-center text-sm text-[color:var(--ink-subtle)]">
                     Match results will appear here with score decomposition and missing-skill signals.
                   </div>
                 )}

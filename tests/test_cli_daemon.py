@@ -129,8 +129,7 @@ def test_daemon_start_surfaces_unreachable_database(monkeypatch, temp_dir: Path)
 
         def start(self, **kwargs):
             raise cli.DaemonError(
-                "Database unavailable: connection to server at '127.0.0.1', "
-                "port 55432 failed: Connection refused"
+                "Database unavailable: connection to server at '127.0.0.1', " "port 55432 failed: Connection refused"
             )
 
     monkeypatch.setattr(cli, "_open_database", fake_open_database)

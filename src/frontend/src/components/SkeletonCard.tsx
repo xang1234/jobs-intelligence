@@ -1,20 +1,21 @@
+import { Skeleton } from '@/components/ui'
+
 export default function SkeletonCard() {
   return (
-    <div className="animate-pulse rounded-lg border border-gray-200 bg-white p-5">
-      {/* Title */}
-      <div className="h-5 w-3/4 rounded bg-gray-200" />
-      {/* Company */}
-      <div className="mt-2 h-4 w-1/2 rounded bg-gray-200" />
-      {/* Salary + Location row */}
-      <div className="mt-3 flex gap-4">
-        <div className="h-4 w-24 rounded bg-gray-200" />
-        <div className="h-4 w-32 rounded bg-gray-200" />
+    <div className="rounded-[var(--radius-xl)] border border-[color:var(--border)] bg-[color:var(--surface-1-alpha)] p-6 shadow-[var(--shadow-xl)]">
+      <Skeleton height={20} width="65%" />
+      <div className="mt-3">
+        <Skeleton height={14} width="40%" />
       </div>
-      {/* Skill tags */}
-      <div className="mt-3 flex gap-2">
-        <div className="h-6 w-16 rounded-full bg-gray-200" />
-        <div className="h-6 w-20 rounded-full bg-gray-200" />
-        <div className="h-6 w-14 rounded-full bg-gray-200" />
+      <div className="mt-4 flex gap-3">
+        <Skeleton height={14} width={90} />
+        <Skeleton height={14} width={120} />
+        <Skeleton height={14} width={80} />
+      </div>
+      <div className="mt-5 flex gap-2">
+        <Skeleton height={24} width={72} rounded="full" />
+        <Skeleton height={24} width={96} rounded="full" />
+        <Skeleton height={24} width={64} rounded="full" />
       </div>
     </div>
   )

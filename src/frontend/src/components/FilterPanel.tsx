@@ -1,116 +1,112 @@
+import { useMemo } from 'react'
 import type { Filters } from '@/types/api'
-
-const EMPLOYMENT_TYPES = ['', 'Full Time', 'Part Time', 'Contract', 'Temporary', 'Freelance']
+import { Button, Input, NumberInput, RangeSlider, Select } from '@/components/ui'
+import type { SelectOption } from '@/components/ui'
 
 interface FilterPanelProps {
   filters: Filters
   onChange: (filters: Filters) => void
+  salaryMin?: number
+  salaryMax?: number
 }
 
-export default function FilterPanel({ filters, onChange }: FilterPanelProps) {
-  function update(patch: Partial<Filters>) {
-    onChange({ ...filters, ...patch })
-  }
+const EMPLOYMENT_OPTIONS: ReadonlyArray<SelectOption<string>> = [
+  { value: 'Full Time', label: 'Full time' },
+  { value: 'Part Time', label: 'Part time' },
+  { value: 'Contract', label: 'Contract' },
+  { value: 'Temporary', label: 'Temporary' },
+  { value: 'Freelance', label: 'Freelance' },
+]
 
-  function handleClear() {
-    onChange({ salary_min: null, salary_max: null, employment_type: null, company: null })
-  }
+function formatMoney(value: number): string {
+  return `$${value.toLocaleString()}`
+}
 
-  const hasFilters = filters.salary_min != null ||
+export default function FilterPanel({
+  filters,
+  onChange,
+  salaryMin = 0,
+  salaryMax = 30000,
+}: FilterPanelProps) {
+  const update = (patch: Partial<Filters>) => onChange({ ...filters, ...patch })
+
+  const hasFilters =
+    filters.salary_min != null ||
     filters.salary_max != null ||
     filters.employment_type != null ||
     filters.company != null
 
+  const salaryError = useMemo(() => {
+    if (
+      filters.salary_min != null &&
+      filters.salary_max != null &&
+      filters.salary_min > filters.salary_max
+    ) {
+      return 'Minimum must be less than maximum'
+    }
+    return null
+  }, [filters.salary_min, filters.salary_max])
+
+  const handleClear = () => {
+    onChange({ salary_min: null, salary_max: null, employment_type: null, company: null })
+  }
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-900">Filters</h3>
+        <h3 className="text-sm font-semibold text-[color:var(--ink)]">Filters</h3>
         {hasFilters && (
-          <button
-            type="button"
-            onClick={handleClear}
-            className="text-xs text-blue-600 hover:text-blue-800"
-          >
+          <Button variant="link" size="sm" onClick={handleClear}>
             Clear all
-          </button>
+          </Button>
         )}
       </div>
 
-      {/* Salary Min */}
-      <div>
-        <label htmlFor="salary-min" className="block text-xs font-medium text-gray-700">
-          Min Salary
-        </label>
-        <input
-          id="salary-min"
-          type="number"
-          min={0}
+      <RangeSlider
+        label="Salary range (monthly)"
+        min={salaryMin}
+        max={salaryMax}
+        step={500}
+        value={[filters.salary_min, filters.salary_max]}
+        onChange={([lo, hi]) => update({ salary_min: lo, salary_max: hi })}
+        formatValue={formatMoney}
+      />
+
+      <div className="grid grid-cols-2 gap-3">
+        <NumberInput
+          label="Min"
+          min={salaryMin}
           step={500}
-          placeholder="e.g. 5000"
-          value={filters.salary_min ?? ''}
-          onChange={(e) =>
-            update({ salary_min: e.target.value ? Number(e.target.value) : null })
-          }
-          className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+          placeholder="5,000"
+          value={filters.salary_min}
+          onValueChange={(v) => update({ salary_min: v })}
         />
-      </div>
-
-      {/* Salary Max */}
-      <div>
-        <label htmlFor="salary-max" className="block text-xs font-medium text-gray-700">
-          Max Salary
-        </label>
-        <input
-          id="salary-max"
-          type="number"
-          min={0}
+        <NumberInput
+          label="Max"
+          min={salaryMin}
           step={500}
-          placeholder="e.g. 15000"
-          value={filters.salary_max ?? ''}
-          onChange={(e) =>
-            update({ salary_max: e.target.value ? Number(e.target.value) : null })
-          }
-          className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+          placeholder="15,000"
+          value={filters.salary_max}
+          onValueChange={(v) => update({ salary_max: v })}
+          error={salaryError}
         />
       </div>
 
-      {/* Employment Type */}
-      <div>
-        <label htmlFor="employment-type" className="block text-xs font-medium text-gray-700">
-          Employment Type
-        </label>
-        <select
-          id="employment-type"
-          value={filters.employment_type ?? ''}
-          onChange={(e) =>
-            update({ employment_type: e.target.value || null })
-          }
-          className="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
-        >
-          {EMPLOYMENT_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {t || 'All types'}
-            </option>
-          ))}
-        </select>
-      </div>
+      <Select<string>
+        label="Employment type"
+        placeholder="All types"
+        value={filters.employment_type}
+        onChange={(v) => update({ employment_type: v })}
+        options={EMPLOYMENT_OPTIONS}
+      />
 
-      {/* Company */}
-      <div>
-        <label htmlFor="company-filter" className="block text-xs font-medium text-gray-700">
-          Company
-        </label>
-        <input
-          id="company-filter"
-          type="text"
-          placeholder="Filter by company"
-          value={filters.company ?? ''}
-          onChange={(e) =>
-            update({ company: e.target.value || null })
-          }
-          className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
-        />
-      </div>
+      <Input
+        label="Company"
+        type="text"
+        placeholder="Filter by company"
+        value={filters.company ?? ''}
+        onChange={(e) => update({ company: e.target.value || null })}
+      />
     </div>
   )
 }

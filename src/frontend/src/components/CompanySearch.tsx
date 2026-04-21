@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { BuildingOfficeIcon } from '@heroicons/react/24/outline'
 import type { CompanySimilarity } from '@/types/api'
+import { Button, Chip, Input, Spinner } from '@/components/ui'
 
 interface CompanySearchProps {
   onSearch: (company: string) => void
@@ -18,29 +19,36 @@ export default function CompanySearch({ onSearch, results, isLoading }: CompanyS
 
   return (
     <div>
-      <h3 className="text-sm font-semibold text-gray-900 mb-3">Company Search</h3>
+      <h3 className="mb-3 text-sm font-semibold text-[color:var(--ink)]">Company search</h3>
 
       <div className="flex gap-2">
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit() }}
-          placeholder="Company name"
-          className="block w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
-        />
-        <button
-          type="button"
+        <div className="flex-1">
+          <Input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleSubmit()
+            }}
+            placeholder="Company name"
+            aria-label="Company name"
+          />
+        </div>
+        <Button
+          variant="secondary"
+          size="md"
           onClick={handleSubmit}
-          disabled={isLoading || !input.trim()}
-          className="rounded-md bg-gray-100 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled={!input.trim()}
+          loading={isLoading}
         >
           Go
-        </button>
+        </Button>
       </div>
 
-      {isLoading && (
-        <div className="mt-3 text-sm text-gray-400">Searching...</div>
+      {isLoading && !results && (
+        <div className="mt-3 flex items-center gap-2 text-sm text-[color:var(--ink-subtle)]">
+          <Spinner size="sm" /> Searching…
+        </div>
       )}
 
       {results && results.length > 0 && (
@@ -48,30 +56,25 @@ export default function CompanySearch({ onSearch, results, isLoading }: CompanyS
           {results.map((c) => (
             <li
               key={c.company_name}
-              className="rounded-md border border-gray-200 p-3 text-sm"
+              className="rounded-[var(--radius-md)] border border-[color:var(--border)] p-3 text-sm"
             >
               <div className="flex items-center gap-2">
-                <BuildingOfficeIcon className="h-4 w-4 text-gray-400 shrink-0" />
-                <span className="font-medium text-gray-900 truncate">{c.company_name}</span>
-                <span className="ml-auto shrink-0 text-xs text-gray-500">
+                <BuildingOfficeIcon className="h-4 w-4 shrink-0 text-[color:var(--ink-subtle)]" />
+                <span className="truncate font-medium text-[color:var(--ink)]">{c.company_name}</span>
+                <span className="ml-auto shrink-0 text-xs text-[color:var(--ink-subtle)]">
                   {(c.similarity_score * 100).toFixed(0)}%
                 </span>
               </div>
-              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500">
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-[color:var(--ink-subtle)]">
                 <span>{c.job_count} jobs</span>
-                {c.avg_salary != null && (
-                  <span>avg ${c.avg_salary.toLocaleString()}</span>
-                )}
+                {c.avg_salary != null && <span>avg ${c.avg_salary.toLocaleString()}</span>}
               </div>
               {c.top_skills.length > 0 && (
                 <div className="mt-1.5 flex flex-wrap gap-1">
                   {c.top_skills.slice(0, 5).map((skill) => (
-                    <span
-                      key={skill}
-                      className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600"
-                    >
+                    <Chip key={skill} intent="neutral" size="sm">
                       {skill}
-                    </span>
+                    </Chip>
                   ))}
                 </div>
               )}
@@ -81,7 +84,7 @@ export default function CompanySearch({ onSearch, results, isLoading }: CompanyS
       )}
 
       {results && results.length === 0 && (
-        <p className="mt-3 text-sm text-gray-500">No similar companies found.</p>
+        <p className="mt-3 text-sm text-[color:var(--ink-subtle)]">No similar companies found.</p>
       )}
     </div>
   )

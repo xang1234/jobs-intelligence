@@ -1,43 +1,35 @@
 import type { SearchResponse } from '@/types/api'
+import { Card, Chip } from '@/components/ui'
 
 export default function SearchStats({ data }: { data: SearchResponse }) {
   return (
-    <div className="rounded-[24px] border border-[color:var(--border)] bg-white/90 p-4 shadow-[0_12px_36px_rgba(15,23,42,0.08)]">
-      <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
+    <Card elevation={1} radius="lg" className="p-4">
+      <div className="flex flex-wrap items-center gap-3 text-sm text-[color:var(--ink-muted)]">
         <span>
-          <span className="font-semibold text-[color:var(--ink)]">{data.total_candidates.toLocaleString()}</span>{' '}
+          <span className="font-semibold text-[color:var(--ink)]">
+            {data.total_candidates.toLocaleString()}
+          </span>{' '}
           candidates
         </span>
-        <span>{data.search_time_ms.toFixed(0)}ms</span>
-        {data.cache_hit && (
-          <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-900">
-            cached
-          </span>
-        )}
-        {data.degraded && (
-          <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
-            keyword fallback
-          </span>
-        )}
+        <span className="text-[color:var(--ink-subtle)]">{data.search_time_ms.toFixed(0)}ms</span>
+        {data.cache_hit && <Chip intent="success" size="sm">cached</Chip>}
+        {data.degraded && <Chip intent="warning" size="sm">keyword fallback</Chip>}
       </div>
 
       {data.query_expansion && data.query_expansion.length > 0 && (
-        <div className="mt-4 rounded-[18px] bg-[color:var(--surface-strong)] p-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+        <div className="mt-4 rounded-[var(--radius-lg)] bg-[color:var(--surface-2)] p-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">
             Query expansion inspector
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
             {data.query_expansion.map((term) => (
-              <span
-                key={term}
-                className="rounded-full border border-[color:var(--border)] bg-white px-3 py-1 text-xs font-medium text-slate-700"
-              >
+              <Chip key={term} intent="neutral" size="sm">
                 {term}
-              </span>
+              </Chip>
             ))}
           </div>
         </div>
       )}
-    </div>
+    </Card>
   )
 }

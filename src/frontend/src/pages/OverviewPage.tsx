@@ -1,10 +1,14 @@
 import { useQuery } from '@tanstack/react-query'
+import { ArrowDownRightIcon, ArrowUpRightIcon, ChartBarIcon } from '@heroicons/react/20/solid'
+import MetricCard from '@/components/overview/MetricCard'
+import { Card, Chip, EmptyState, Skeleton, SkeletonText } from '@/components/ui'
 import {
   getOverview,
   getPerformanceStats,
   getPopularQueries,
   getStats,
 } from '@/services/api'
+import type { MomentumCard } from '@/types/api'
 
 function formatMoney(value: number | null): string {
   if (value == null) return 'N/A'
@@ -12,14 +16,8 @@ function formatMoney(value: number | null): string {
 }
 
 export default function OverviewPage() {
-  const overview = useQuery({
-    queryKey: ['overview'],
-    queryFn: () => getOverview(12),
-  })
-  const stats = useQuery({
-    queryKey: ['stats'],
-    queryFn: getStats,
-  })
+  const overview = useQuery({ queryKey: ['overview'], queryFn: () => getOverview(12) })
+  const stats = useQuery({ queryKey: ['stats'], queryFn: getStats })
   const popular = useQuery({
     queryKey: ['popularQueries'],
     queryFn: () => getPopularQueries(30, 8),
@@ -30,170 +28,275 @@ export default function OverviewPage() {
   })
 
   const data = overview.data
+  const salaryDelta = data?.salary_movement.change_pct ?? null
 
   return (
     <div className="space-y-8">
-      <section className="grid gap-6 rounded-[32px] border border-[color:var(--border)] bg-[linear-gradient(135deg,rgba(248,240,214,0.96),rgba(211,236,231,0.82))] p-8 shadow-[0_28px_90px_rgba(15,23,42,0.10)] lg:grid-cols-[1.35fr_0.65fr]">
+      <Card
+        as="section"
+        radius="2xl"
+        elevation={2}
+        className="grid gap-6 p-8 lg:grid-cols-[1.35fr_0.65fr]"
+        style={{
+          background:
+            'linear-gradient(135deg, color-mix(in srgb, var(--color-accent-100) 70%, var(--surface-1-alpha)), color-mix(in srgb, var(--color-brand-100) 50%, var(--surface-1-alpha)))',
+        }}
+      >
         <div className="space-y-4">
-          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-600">
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[color:var(--ink-muted)]">
             Singapore hiring-market intelligence
           </p>
           <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-[color:var(--ink)] sm:text-5xl">
             Track demand shifts, salary movement, and the skill graph behind the market.
           </h1>
-          <p className="max-w-2xl text-base leading-7 text-slate-700">
+          <p className="max-w-2xl text-base leading-7 text-[color:var(--ink-muted)]">
             This platform surfaces recruiter-grade job-market signals on top of hybrid search,
             embeddings, related-skill neighborhoods, and profile-to-role matching.
           </p>
         </div>
 
-        <div className="rounded-[28px] bg-white/80 p-6 backdrop-blur">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+        <Card radius="xl" elevation={0} className="p-6">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--ink-subtle)]">
             Retrieval stack health
           </p>
-          <dl className="mt-4 grid gap-4 text-sm text-slate-600">
-            <div className="flex items-center justify-between">
-              <dt>Jobs indexed</dt>
-              <dd className="font-semibold text-[color:var(--ink)]">
-                {stats.data?.total_jobs.toLocaleString() ?? '...'}
-              </dd>
-            </div>
-            <div className="flex items-center justify-between">
-              <dt>Embedding coverage</dt>
-              <dd className="font-semibold text-[color:var(--ink)]">
-                {stats.data ? `${stats.data.embedding_coverage_pct.toFixed(1)}%` : '...'}
-              </dd>
-            </div>
-            <div className="flex items-center justify-between">
-              <dt>Median latency p95</dt>
-              <dd className="font-semibold text-[color:var(--ink)]">
-                {performance.data ? `${performance.data.p95_ms.toFixed(0)}ms` : '...'}
-              </dd>
-            </div>
-            <div className="flex items-center justify-between">
-              <dt>Model</dt>
-              <dd className="font-semibold text-[color:var(--ink)]">
-                {stats.data?.model_version ?? '...'}
-              </dd>
-            </div>
+          <dl className="mt-4 grid gap-4 text-sm text-[color:var(--ink-muted)]">
+            <StackRow
+              label="Jobs indexed"
+              value={stats.data?.total_jobs.toLocaleString()}
+              loading={stats.isLoading}
+            />
+            <StackRow
+              label="Embedding coverage"
+              value={
+                stats.data
+                  ? `${stats.data.embedding_coverage_pct.toFixed(1)}%`
+                  : undefined
+              }
+              loading={stats.isLoading}
+            />
+            <StackRow
+              label="Median latency p95"
+              value={
+                performance.data ? `${performance.data.p95_ms.toFixed(0)}ms` : undefined
+              }
+              loading={performance.isLoading}
+            />
+            <StackRow
+              label="Model"
+              value={stats.data?.model_version}
+              loading={stats.isLoading}
+            />
           </dl>
-        </div>
-      </section>
+        </Card>
+      </Card>
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <article className="rounded-[26px] border border-[color:var(--border)] bg-white/90 p-5">
-          <p className="text-sm text-slate-500">Tracked jobs</p>
-          <p className="mt-2 text-3xl font-semibold text-[color:var(--ink)]">
-            {data?.headline_metrics.total_jobs.toLocaleString() ?? '...'}
-          </p>
-        </article>
-        <article className="rounded-[26px] border border-[color:var(--border)] bg-white/90 p-5">
-          <p className="text-sm text-slate-500">This month</p>
-          <p className="mt-2 text-3xl font-semibold text-[color:var(--ink)]">
-            {data?.headline_metrics.current_month_jobs.toLocaleString() ?? '...'}
-          </p>
-        </article>
-        <article className="rounded-[26px] border border-[color:var(--border)] bg-white/90 p-5">
-          <p className="text-sm text-slate-500">Companies</p>
-          <p className="mt-2 text-3xl font-semibold text-[color:var(--ink)]">
-            {data?.headline_metrics.unique_companies.toLocaleString() ?? '...'}
-          </p>
-        </article>
-        <article className="rounded-[26px] border border-[color:var(--border)] bg-white/90 p-5">
-          <p className="text-sm text-slate-500">Average annual salary</p>
-          <p className="mt-2 text-3xl font-semibold text-[color:var(--ink)]">
-            {formatMoney(data?.headline_metrics.avg_salary_annual ?? null)}
-          </p>
-        </article>
+        <MetricCard
+          label="Tracked jobs"
+          value={data?.headline_metrics.total_jobs.toLocaleString()}
+          loading={overview.isLoading}
+          elevation={2}
+        />
+        <MetricCard
+          label="This month"
+          value={data?.headline_metrics.current_month_jobs.toLocaleString()}
+          loading={overview.isLoading}
+        />
+        <MetricCard
+          label="Companies"
+          value={data?.headline_metrics.unique_companies.toLocaleString()}
+          loading={overview.isLoading}
+        />
+        <MetricCard
+          label="Average annual salary"
+          value={formatMoney(data?.headline_metrics.avg_salary_annual ?? null)}
+          loading={overview.isLoading}
+          deltaPct={salaryDelta}
+        />
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[1.1fr_1.1fr_0.8fr]">
-        <article className="rounded-[28px] border border-[color:var(--border)] bg-white/90 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Fastest-rising skills</p>
-              <h2 className="mt-1 text-xl font-semibold text-[color:var(--ink)]">Demand momentum</h2>
-            </div>
-          </div>
-          <div className="mt-5 space-y-3">
-            {data?.rising_skills.map((item) => (
-              <div key={item.name} className="flex items-center justify-between rounded-[20px] bg-[color:var(--surface)] px-4 py-3">
-                <div>
-                  <p className="font-semibold text-[color:var(--ink)]">{item.name}</p>
-                  <p className="text-xs text-slate-500">{item.job_count.toLocaleString()} jobs</p>
-                </div>
-                <div className="text-right">
-                  <p className={`text-sm font-semibold ${item.momentum >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                    {item.momentum >= 0 ? '+' : ''}{item.momentum.toFixed(1)}%
-                  </p>
-                  <p className="text-xs text-slate-500">{formatMoney(item.median_salary_annual)}</p>
-                </div>
-              </div>
-            )) ?? <p className="text-sm text-slate-500">Loading skill movers...</p>}
-          </div>
-        </article>
+        <MomentumList
+          eyebrow="Fastest-rising skills"
+          title="Demand momentum"
+          items={data?.rising_skills}
+          loading={overview.isLoading}
+        />
+        <MomentumList
+          eyebrow="Fastest-rising companies"
+          title="Hiring velocity"
+          items={data?.rising_companies}
+          loading={overview.isLoading}
+        />
 
-        <article className="rounded-[28px] border border-[color:var(--border)] bg-white/90 p-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Fastest-rising companies</p>
-          <h2 className="mt-1 text-xl font-semibold text-[color:var(--ink)]">Hiring velocity</h2>
-          <div className="mt-5 space-y-3">
-            {data?.rising_companies.map((item) => (
-              <div key={item.name} className="flex items-center justify-between rounded-[20px] bg-[color:var(--surface)] px-4 py-3">
-                <div>
-                  <p className="font-semibold text-[color:var(--ink)]">{item.name}</p>
-                  <p className="text-xs text-slate-500">{item.job_count.toLocaleString()} jobs</p>
-                </div>
-                <div className="text-right">
-                  <p className={`text-sm font-semibold ${item.momentum >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                    {item.momentum >= 0 ? '+' : ''}{item.momentum.toFixed(1)}%
-                  </p>
-                  <p className="text-xs text-slate-500">{formatMoney(item.median_salary_annual)}</p>
-                </div>
-              </div>
-            )) ?? <p className="text-sm text-slate-500">Loading company movers...</p>}
-          </div>
-        </article>
-
-        <article className="space-y-6">
-          <div className="rounded-[28px] border border-[color:var(--border)] bg-white/90 p-6">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Salary movement</p>
-            <h2 className="mt-1 text-xl font-semibold text-[color:var(--ink)]">
-              {formatMoney(data?.salary_movement.current_median_salary_annual ?? null)}
-            </h2>
-            <p className={`mt-3 text-sm font-semibold ${(data?.salary_movement.change_pct ?? 0) >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-              {(data?.salary_movement.change_pct ?? 0) >= 0 ? '+' : ''}
-              {data?.salary_movement.change_pct.toFixed(1) ?? '0.0'}% vs prior month
+        <div className="space-y-6">
+          <Card radius="xl" className="p-6">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">
+              Salary movement
             </p>
-          </div>
+            {overview.isLoading ? (
+              <div className="mt-2 space-y-3">
+                <Skeleton height={28} width="70%" />
+                <Skeleton height={16} width="50%" />
+              </div>
+            ) : (
+              <>
+                <h2 className="mt-1 text-2xl font-semibold text-[color:var(--ink)]">
+                  {formatMoney(data?.salary_movement.current_median_salary_annual ?? null)}
+                </h2>
+                {salaryDelta != null && (
+                  <Chip
+                    intent={salaryDelta >= 0 ? 'success' : 'danger'}
+                    size="sm"
+                    leftIcon={
+                      salaryDelta >= 0 ? (
+                        <ArrowUpRightIcon className="h-3 w-3" />
+                      ) : (
+                        <ArrowDownRightIcon className="h-3 w-3" />
+                      )
+                    }
+                    className="mt-3"
+                  >
+                    {salaryDelta >= 0 ? '+' : ''}
+                    {salaryDelta.toFixed(1)}% vs prior month
+                  </Chip>
+                )}
+              </>
+            )}
+          </Card>
 
-          <div className="rounded-[28px] border border-[color:var(--border)] bg-white/90 p-6">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Recent search demand</p>
+          <Card radius="xl" className="p-6">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">
+              Recent search demand
+            </p>
             <div className="mt-4 flex flex-wrap gap-2">
-              {popular.data?.map((item) => (
-                <span key={item.query} className="rounded-full bg-[color:var(--surface)] px-3 py-1.5 text-xs font-medium text-slate-700">
-                  {item.query} ({item.count})
-                </span>
-              )) ?? <p className="text-sm text-slate-500">No analytics yet.</p>}
+              {popular.isLoading ? (
+                <SkeletonText lines={2} />
+              ) : popular.data && popular.data.length > 0 ? (
+                popular.data.map((item) => (
+                  <Chip key={item.query} intent="neutral" size="sm">
+                    {item.query} <span className="opacity-60">({item.count})</span>
+                  </Chip>
+                ))
+              ) : (
+                <p className="text-sm text-[color:var(--ink-subtle)]">No analytics yet.</p>
+              )}
             </div>
-          </div>
-        </article>
+          </Card>
+        </div>
       </section>
 
       <section className="grid gap-4 md:grid-cols-2">
-        {data?.market_insights.map((insight) => (
-          <article key={insight.label} className="rounded-[24px] border border-[color:var(--border)] bg-white/90 p-5">
-            <p className="text-sm text-slate-500">{insight.label}</p>
-            <div className="mt-2 flex items-end justify-between gap-4">
-              <p className="text-2xl font-semibold text-[color:var(--ink)]">
-                {insight.value != null ? insight.value.toLocaleString() : 'N/A'}
-              </p>
-              <p className={`text-sm font-semibold ${insight.delta >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                {insight.delta >= 0 ? '+' : ''}{insight.delta.toFixed(1)}%
-              </p>
-            </div>
-          </article>
-        )) ?? null}
+        {overview.isLoading
+          ? Array.from({ length: 4 }).map((_, i) => (
+              <Card key={i} radius="xl" className="p-5">
+                <Skeleton height={14} width="35%" />
+                <div className="mt-2">
+                  <Skeleton height={32} width="55%" />
+                </div>
+              </Card>
+            ))
+          : data?.market_insights.map((insight) => (
+              <MetricCard
+                key={insight.label}
+                label={insight.label}
+                value={insight.value != null ? insight.value.toLocaleString() : 'N/A'}
+                deltaPct={insight.delta}
+              />
+            )) ?? (
+              <EmptyState
+                icon={<ChartBarIcon />}
+                title="No market insights yet"
+                description="Insight cards will appear once enough jobs are tracked this month."
+                compact
+              />
+            )}
       </section>
     </div>
+  )
+}
+
+function StackRow({
+  label,
+  value,
+  loading,
+}: {
+  label: string
+  value: string | undefined
+  loading: boolean
+}) {
+  return (
+    <div className="flex items-center justify-between">
+      <dt>{label}</dt>
+      <dd className="font-semibold text-[color:var(--ink)]">
+        {loading || value == null ? <Skeleton height={16} width={80} /> : value}
+      </dd>
+    </div>
+  )
+}
+
+function MomentumList({
+  eyebrow,
+  title,
+  items,
+  loading,
+}: {
+  eyebrow: string
+  title: string
+  items: MomentumCard[] | undefined
+  loading: boolean
+}) {
+  return (
+    <Card as="article" radius="xl" className="p-6">
+      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">
+        {eyebrow}
+      </p>
+      <h2 className="mt-1 text-xl font-semibold text-[color:var(--ink)]">{title}</h2>
+      <div className="mt-5 space-y-3">
+        {loading ? (
+          Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} height={56} rounded="lg" />
+          ))
+        ) : items && items.length > 0 ? (
+          items.map((item) => {
+            const up = item.momentum >= 0
+            return (
+              <div
+                key={item.name}
+                className="flex items-center justify-between rounded-[var(--radius-lg)] bg-[color:var(--surface-2)] px-4 py-3"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-semibold text-[color:var(--ink)]">{item.name}</p>
+                  <p className="text-xs text-[color:var(--ink-subtle)]">
+                    {item.job_count.toLocaleString()} jobs
+                  </p>
+                </div>
+                <div className="flex flex-col items-end gap-1">
+                  <Chip
+                    intent={up ? 'success' : 'danger'}
+                    size="sm"
+                    leftIcon={
+                      up ? (
+                        <ArrowUpRightIcon className="h-3 w-3" />
+                      ) : (
+                        <ArrowDownRightIcon className="h-3 w-3" />
+                      )
+                    }
+                  >
+                    {up ? '+' : ''}
+                    {item.momentum.toFixed(1)}%
+                  </Chip>
+                  <p className="text-xs text-[color:var(--ink-subtle)]">
+                    {formatMoney(item.median_salary_annual)}
+                  </p>
+                </div>
+              </div>
+            )
+          })
+        ) : (
+          <p className="text-sm text-[color:var(--ink-subtle)]">No data yet.</p>
+        )}
+      </div>
+    </Card>
   )
 }
