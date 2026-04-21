@@ -112,6 +112,41 @@ def test_daemon_start_fails_cleanly_when_database_is_busy(monkeypatch, temp_dir:
 
     assert result.exit_code == 1
     assert "Database is busy" in result.stdout
+    assert "Stop the other scrape process" in result.stdout
+
+
+def test_daemon_start_surfaces_unreachable_database(monkeypatch, temp_dir: Path):
+    """Start should distinguish 'server down' from 'another writer' so users
+    don't chase phantom processes when the real problem is connectivity."""
+    db_path = temp_dir / "test.db"
+
+    def fake_open_database(path: str | None, *, read_only: bool = False, ensure_schema: bool = True):
+        return object()
+
+    class FakeDaemon:
+        def __init__(self, db):
+            self.db = db
+
+        def start(self, **kwargs):
+            raise cli.DaemonError(
+                "Database unavailable: connection to server at '127.0.0.1', "
+                "port 55432 failed: Connection refused"
+            )
+
+    monkeypatch.setattr(cli, "_open_database", fake_open_database)
+    monkeypatch.setattr(cli, "ScraperDaemon", FakeDaemon)
+
+    result = runner.invoke(
+        cli.app,
+        ["daemon", "start", "--year", "2022", "--db", str(db_path)],
+    )
+
+    assert result.exit_code == 1
+    assert "Database unavailable" in result.stdout
+    assert "Connection refused" in result.stdout
+    # The "stop the other process" hint would be misleading here.
+    assert "Stop the other scrape process" not in result.stdout
+    assert "database server is running and reachable" in result.stdout
 
 
 def test_daemon_start_uses_persisted_database_target_when_db_is_omitted(monkeypatch, temp_dir: Path):

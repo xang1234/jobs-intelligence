@@ -384,12 +384,15 @@ class PostgresDatabase:
     @staticmethod
     def can_acquire_write_lock(db_path: str, timeout_ms: int = 1000) -> bool:
         if db_path.strip().lower().startswith(("postgres://", "postgresql://")):
-            try:
-                db = PostgresDatabase(db_path, read_only=False, ensure_schema=False)
-                with db._connection():
-                    return True
-            except Exception:
-                return False
+            # Postgres permits concurrent writers, so "acquiring a write lock" only
+            # means verifying we can open a writable connection. We deliberately let
+            # connection, authentication, and schema errors propagate rather than
+            # squash them into False — callers need to distinguish "server is
+            # unreachable" from "another process holds the lock" to give users a
+            # useful error message.
+            db = PostgresDatabase(db_path, read_only=False, ensure_schema=False)
+            with db._connection():
+                return True
         return MCFDatabase.can_acquire_write_lock(db_path, timeout_ms=timeout_ms)
 
     def _save_to_history(self, conn: Any, existing: dict[str, Any]) -> None:

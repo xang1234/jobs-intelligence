@@ -207,7 +207,15 @@ class ScraperDaemon:
         if self.is_running():
             pid = self.get_pid()
             raise DaemonAlreadyRunning(f"Daemon already running with PID {pid}")
-        if not self.db.can_acquire_write_lock(db_path):
+        try:
+            writable = self.db.can_acquire_write_lock(db_path)
+        except Exception as exc:
+            # Connection refused, auth failure, missing database, etc. The
+            # message from psycopg / sqlite3 already names the real problem
+            # (e.g. "connection refused on port 55432"), so surface it as-is
+            # instead of claiming another process is writing.
+            raise DaemonError(f"Database unavailable: {exc}") from exc
+        if not writable:
             raise DaemonError("Database is busy: another process is writing to it")
 
         # Build command for the worker subprocess

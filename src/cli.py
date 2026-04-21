@@ -1228,7 +1228,14 @@ def daemon_cmd(
             raise typer.Exit(1)
         except DaemonError as e:
             console.print(f"[red]{e}[/red]")
-            console.print("Stop the other scrape process before starting the daemon.")
+            message = str(e)
+            if "busy" in message.lower():
+                console.print("Stop the other scrape process before starting the daemon.")
+            elif "unavailable" in message.lower():
+                console.print(
+                    "Check that the database server is running and reachable "
+                    "at the configured DSN."
+                )
             raise typer.Exit(1)
 
     elif action == "stop":
