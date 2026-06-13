@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "test:unit": "node --test tests/*.test.ts",
     "test:integration": "npx --yes --package playwright node --test tests/*.test.mjs"
   },
   "dependencies": {

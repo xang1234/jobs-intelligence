@@ -21,6 +21,18 @@ The backend API is expected at `/api/*` on the same origin. During local develop
 poetry run python -m src.cli api-serve --reload
 ```
 
+For static hosting where the API lives on a different origin, set `VITE_API_BASE_URL` at build time:
+
+```bash
+VITE_API_BASE_URL=https://xang1234-jobs-intelligence-api.hf.space npm run build
+```
+
+Cloudflare Pages should use:
+
+```text
+VITE_API_BASE_URL=https://xang1234-jobs-intelligence-api.hf.space
+```
+
 ## Build
 
 ```bash

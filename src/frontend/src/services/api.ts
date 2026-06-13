@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { resolveApiBaseUrl } from '@/services/apiBaseUrl'
 import type {
   CareerDeltaAnalysisRequest,
   CareerDeltaAnalysisResponse,
@@ -29,7 +30,7 @@ import type {
 } from '@/types/api'
 
 const client = axios.create({
-  baseURL: '/',
+  baseURL: resolveApiBaseUrl(),
   headers: { 'Content-Type': 'application/json' },
 })
 
