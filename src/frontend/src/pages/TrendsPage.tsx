@@ -1,42 +1,131 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowDownRightIcon, ArrowUpRightIcon } from '@heroicons/react/20/solid'
+import { ArrowDownRightIcon, ArrowRightIcon, ArrowUpRightIcon } from '@heroicons/react/20/solid'
 import TrendSparkline from '@/components/TrendSparkline'
-import { Card, Chip, Input, Select, Skeleton } from '@/components/ui'
-import type { SelectOption } from '@/components/ui'
-import { getCompanyTrend, getRoleTrend, getSkillTrends } from '@/services/api'
+import { Card, Chip, EmptyState, Input, Select, Skeleton } from '@/components/ui'
+import type { ChipIntent, SelectOption } from '@/components/ui'
+import { getCompanyTrend, getOverview, getRoleTrend, getSkillTrends } from '@/services/api'
+import { getMomentumSignal, TREND_WINDOW_OPTIONS } from '@/services/trendSignals'
+import type { SkillTrendSeries, TrendPoint } from '@/types/api'
 
 function formatMoney(value: number | null): string {
   if (value == null) return 'N/A'
   return `$${value.toLocaleString()}`
 }
 
-const MONTHS_OPTIONS: ReadonlyArray<SelectOption<number>> = [
-  { value: 6, label: '6 months' },
-  { value: 12, label: '12 months' },
-  { value: 18, label: '18 months' },
-  { value: 24, label: '24 months' },
-]
+function formatMonth(value: string | null | undefined): string {
+  if (!value) return 'No month'
+  const [year, month] = value.split('-')
+  const date = new Date(Number(year), Number(month) - 1, 1)
+  return date.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
+}
 
-function MomentumChip({ value }: { value: number }) {
-  const up = value >= 0
+function activeMonths(points: TrendPoint[]): number {
+  return points.filter((point) => point.job_count > 0).length
+}
+
+function latestPoint(points: TrendPoint[]): TrendPoint | null {
+  return points.at(-1) ?? null
+}
+
+function trendSummary(label: string, latest: TrendPoint | null, points: TrendPoint[]): string {
+  if (!latest || latest.job_count === 0) {
+    return `No matching postings for ${label} in the hosted window. Try a broader keyword or remove filters.`
+  }
+  const month = formatMonth(latest.month)
+  const signal = getMomentumSignal(latest)
+  if (!signal.showPercent) {
+    return `${latest.job_count.toLocaleString()} postings in ${month}; treat this as current demand, not growth.`
+  }
+  return `${latest.job_count.toLocaleString()} postings in ${month}, ${signal.detail.toLowerCase()}. Active in ${activeMonths(points)} of ${points.length} months.`
+}
+
+function MomentumChip({ point }: { point: TrendPoint | null | undefined }) {
+  const signal = getMomentumSignal(point)
+  const icon =
+    point?.momentum_status === 'up' ? (
+      <ArrowUpRightIcon className="h-3 w-3" />
+    ) : point?.momentum_status === 'down' ? (
+      <ArrowDownRightIcon className="h-3 w-3" />
+    ) : signal.showPercent ? (
+      <ArrowRightIcon className="h-3 w-3" />
+    ) : null
+
   return (
-    <Chip
-      intent={up ? 'success' : 'danger'}
-      size="sm"
-      leftIcon={up ? <ArrowUpRightIcon className="h-3 w-3" /> : <ArrowDownRightIcon className="h-3 w-3" />}
-    >
-      {up ? '+' : ''}
-      {value.toFixed(1)}%
+    <Chip intent={signal.intent as ChipIntent} size="sm" leftIcon={icon}>
+      {signal.label}
     </Chip>
   )
 }
 
+function SignalMetric({
+  label,
+  value,
+  detail,
+}: {
+  label: string
+  value: string
+  detail?: string
+}) {
+  return (
+    <div className="rounded-[var(--radius-lg)] bg-[color:var(--surface-2)] px-4 py-3">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-subtle)]">
+        {label}
+      </p>
+      <p className="mt-2 text-xl font-semibold text-[color:var(--ink)]">{value}</p>
+      {detail ? <p className="mt-1 text-xs text-[color:var(--ink-subtle)]">{detail}</p> : null}
+    </div>
+  )
+}
+
+function SkillSignalCard({ series }: { series: SkillTrendSeries }) {
+  const latest = series.latest
+  return (
+    <div className="rounded-[var(--radius-lg)] bg-[color:var(--surface-2)] p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h2 className="text-lg font-semibold text-[color:var(--ink)]">{series.skill}</h2>
+          <p className="mt-1 text-sm leading-6 text-[color:var(--ink-muted)]">
+            {trendSummary(series.skill, latest, series.series)}
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <MomentumChip point={latest} />
+          <p className="text-xs text-[color:var(--ink-subtle)]">
+            {formatMoney(latest?.median_salary_annual ?? null)}
+          </p>
+        </div>
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <SignalMetric label="Current jobs" value={(latest?.job_count ?? 0).toLocaleString()} />
+        <SignalMetric
+          label="Market share"
+          value={`${(latest?.market_share ?? 0).toFixed(2)}%`}
+          detail={formatMonth(latest?.month)}
+        />
+        <SignalMetric
+          label="Evidence"
+          value={`${activeMonths(series.series)}/${series.series.length}`}
+          detail="active months"
+        />
+      </div>
+      <div className="mt-4">
+        <TrendSparkline
+          points={series.series}
+          ariaLabel={`${series.skill} postings over the hosted trend window`}
+        />
+      </div>
+    </div>
+  )
+}
+
+const MONTHS_OPTIONS = TREND_WINDOW_OPTIONS as ReadonlyArray<SelectOption<number>>
+
 export default function TrendsPage() {
-  const [skillInput, setSkillInput] = useState('Python, SQL, Machine Learning')
-  const [roleInput, setRoleInput] = useState('data scientist')
-  const [companyInput, setCompanyInput] = useState('DBS BANK LTD.')
-  const [months, setMonths] = useState<number>(12)
+  const [skillInput, setSkillInput] = useState('Customer Service, Microsoft Excel, Communication Skills')
+  const [roleInput, setRoleInput] = useState('customer service')
+  const [companyInput, setCompanyInput] = useState('RECRUIT EXPERT PTE. LTD.')
+  const [months, setMonths] = useState<number>(3)
   const [employmentType, setEmploymentType] = useState('')
   const [region, setRegion] = useState('')
 
@@ -44,6 +133,11 @@ export default function TrendsPage() {
     () => skillInput.split(',').map((item) => item.trim()).filter(Boolean).slice(0, 3),
     [skillInput],
   )
+
+  const overview = useQuery({
+    queryKey: ['overview', months],
+    queryFn: () => getOverview(months),
+  })
 
   const skillTrends = useQuery({
     queryKey: ['skillTrends', skills, months, employmentType, region],
@@ -75,23 +169,32 @@ export default function TrendsPage() {
     enabled: companyInput.trim().length > 0,
   })
 
+  const roleLatest = roleTrend.data?.latest ?? null
+  const companyLatest = latestPoint(companyTrend.data?.series ?? [])
+  const companyActiveMonths = activeMonths(companyTrend.data?.series ?? [])
+  const companySkillSnapshots = companyTrend.data?.top_skills_by_month.filter((snapshot) => snapshot.skills.length) ?? []
+
   return (
     <div className="space-y-8">
       <Card as="section" radius="2xl" className="p-8">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <div>
+          <div className="max-w-3xl">
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[color:var(--ink-subtle)]">
-              Trends explorer
+              90-day market signals
             </p>
             <h1 className="mt-2 text-4xl font-semibold tracking-tight text-[color:var(--ink)]">
-              Compare skills, roles, and hiring companies over time.
+              Decide what to emphasize in your CV and search.
             </h1>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-[color:var(--ink-muted)]">
+              The hosted Neon dataset is intentionally capped to the latest three-month window. Signals marked as new
+              show current demand without pretending there is a long historical baseline.
+            </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-3">
             <Select<number>
-              label="Window"
+              label="Hosted window"
               value={months}
-              onChange={(v) => setMonths(v ?? 12)}
+              onChange={(v) => setMonths(v ?? 3)}
               options={MONTHS_OPTIONS}
               clearable={false}
             />
@@ -105,22 +208,41 @@ export default function TrendsPage() {
               label="Region"
               value={region}
               onChange={(e) => setRegion(e.target.value)}
-              placeholder="Central"
+              placeholder="Singapore"
             />
           </div>
         </div>
+
+        <div className="mt-6 grid gap-3 sm:grid-cols-3">
+          <SignalMetric
+            label="Jobs in latest month"
+            value={(overview.data?.headline_metrics.current_month_jobs ?? 0).toLocaleString()}
+            detail={overview.isLoading ? 'loading' : `${months}-month hosted window`}
+          />
+          <SignalMetric
+            label="Average salary"
+            value={formatMoney(overview.data?.headline_metrics.avg_salary_annual ?? null)}
+            detail="annualized midpoint"
+          />
+          <SignalMetric
+            label="Interpretation"
+            value="Demand first"
+            detail="growth only when baseline exists"
+          />
+        </div>
       </Card>
 
-      <section className="grid gap-6 xl:grid-cols-2">
+      <section className="grid items-start gap-6 xl:grid-cols-2">
         <Card as="article" radius="xl" className="p-6">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">
-            Skill comparison
+            Skill evidence
           </p>
-          <div className="mt-3">
+          <h2 className="mt-2 text-2xl font-semibold text-[color:var(--ink)]">What should your CV surface?</h2>
+          <div className="mt-4">
             <Input
               value={skillInput}
               onChange={(e) => setSkillInput(e.target.value)}
-              placeholder="Python, SQL, Machine Learning"
+              placeholder="Customer Service, Microsoft Excel, Communication Skills"
               hint="Up to 3 comma-separated skills"
               aria-label="Skill list"
             />
@@ -128,92 +250,83 @@ export default function TrendsPage() {
           <div className="mt-5 grid gap-4">
             {skillTrends.isLoading
               ? Array.from({ length: 3 }).map((_, i) => (
-                  <Skeleton key={i} height={160} rounded="lg" />
+                  <Skeleton key={i} height={210} rounded="lg" />
                 ))
-              : skillTrends.data?.map((series) => (
-                  <div
-                    key={series.skill}
-                    className="rounded-[var(--radius-lg)] bg-[color:var(--surface-2)] p-4"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h2 className="text-lg font-semibold text-[color:var(--ink)]">
-                          {series.skill}
-                        </h2>
-                        <p className="text-sm text-[color:var(--ink-subtle)]">
-                          {series.latest?.job_count.toLocaleString() ?? 0} jobs this month
-                        </p>
-                      </div>
-                      <div className="flex flex-col items-end gap-1">
-                        <MomentumChip value={series.latest?.momentum ?? 0} />
-                        <p className="text-xs text-[color:var(--ink-subtle)]">
-                          {formatMoney(series.latest?.median_salary_annual ?? null)}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="mt-3">
-                      <TrendSparkline points={series.series} />
-                    </div>
-                  </div>
-                )) ?? <p className="text-sm text-[color:var(--ink-subtle)]">No trends yet.</p>}
+              : skillTrends.data?.length
+                ? skillTrends.data.map((series) => <SkillSignalCard key={series.skill} series={series} />)
+                : (
+                    <EmptyState
+                      title="No skill signals found"
+                      description="Try broader skill names or remove one of the filters."
+                    />
+                  )}
           </div>
         </Card>
 
         <Card as="article" radius="xl" className="p-6">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">
-            Role trend
+            Role evidence
           </p>
-          <div className="mt-3">
+          <h2 className="mt-2 text-2xl font-semibold text-[color:var(--ink)]">Is this search target active?</h2>
+          <div className="mt-4">
             <Input
               value={roleInput}
               onChange={(e) => setRoleInput(e.target.value)}
-              placeholder="data scientist"
+              placeholder="customer service"
               aria-label="Role query"
             />
           </div>
           {roleTrend.isLoading ? (
             <div className="mt-5">
-              <Skeleton height={160} rounded="lg" />
+              <Skeleton height={240} rounded="lg" />
             </div>
           ) : roleTrend.data ? (
             <div className="mt-5 rounded-[var(--radius-lg)] bg-[color:var(--surface-2)] p-5">
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                <div>
-                  <h2 className="text-lg font-semibold text-[color:var(--ink)]">
-                    {roleTrend.data.query}
-                  </h2>
-                  <p className="text-sm text-[color:var(--ink-subtle)]">
-                    Market share {roleTrend.data.latest?.market_share.toFixed(1) ?? '0.0'}%
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <h2 className="text-lg font-semibold text-[color:var(--ink)]">{roleTrend.data.query}</h2>
+                  <p className="mt-1 text-sm leading-6 text-[color:var(--ink-muted)]">
+                    {trendSummary(roleTrend.data.query, roleLatest, roleTrend.data.series)}
                   </p>
                 </div>
-                <div className="flex flex-col items-end gap-1">
-                  <MomentumChip value={roleTrend.data.latest?.momentum ?? 0} />
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  <MomentumChip point={roleLatest} />
                   <p className="text-xs text-[color:var(--ink-subtle)]">
-                    {formatMoney(roleTrend.data.latest?.median_salary_annual ?? null)}
+                    {formatMoney(roleLatest?.median_salary_annual ?? null)}
                   </p>
                 </div>
               </div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                <SignalMetric label="Current jobs" value={(roleLatest?.job_count ?? 0).toLocaleString()} />
+                <SignalMetric label="Market share" value={`${(roleLatest?.market_share ?? 0).toFixed(2)}%`} />
+                <SignalMetric label="Evidence" value={`${activeMonths(roleTrend.data.series)}/${roleTrend.data.series.length}`} detail="active months" />
+              </div>
               <div className="mt-4">
-                <TrendSparkline points={roleTrend.data.series} />
+                <TrendSparkline points={roleTrend.data.series} ariaLabel={`${roleTrend.data.query} postings over time`} />
               </div>
             </div>
           ) : (
-            <p className="mt-5 text-sm text-[color:var(--ink-subtle)]">No role trend yet.</p>
+            <EmptyState title="No role signal yet" description="Enter a role or keyword to compare current demand." />
           )}
         </Card>
       </section>
 
       <Card as="section" radius="xl" className="p-6">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">
-          Company hiring pattern
-        </p>
-        <div className="mt-3">
-          <Input
-            value={companyInput}
-            onChange={(e) => setCompanyInput(e.target.value)}
-            placeholder="DBS BANK LTD."
-            aria-label="Company name"
-          />
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">
+              Employer evidence
+            </p>
+            <h2 className="mt-2 text-2xl font-semibold text-[color:var(--ink)]">Who is hiring in this slice?</h2>
+          </div>
+          <div className="lg:w-96">
+            <Input
+              value={companyInput}
+              onChange={(e) => setCompanyInput(e.target.value)}
+              placeholder="RECRUIT EXPERT PTE. LTD."
+              aria-label="Company name"
+            />
+          </div>
         </div>
 
         {companyTrend.isLoading && (
@@ -225,72 +338,88 @@ export default function TrendsPage() {
         {companyTrend.data && (
           <div className="mt-5 grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
             <div className="rounded-[var(--radius-lg)] bg-[color:var(--surface-2)] p-5">
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                <div>
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="min-w-0">
                   <h2 className="text-lg font-semibold text-[color:var(--ink)]">
                     {companyTrend.data.company_name}
                   </h2>
-                  <p className="text-sm text-[color:var(--ink-subtle)]">
-                    {companyTrend.data.series.at(-1)?.job_count.toLocaleString() ?? 0} jobs this month
+                  <p className="mt-1 text-sm leading-6 text-[color:var(--ink-muted)]">
+                    {trendSummary(companyTrend.data.company_name, companyLatest, companyTrend.data.series)}
                   </p>
                 </div>
-                <div className="flex flex-col items-end gap-1">
-                  <MomentumChip value={companyTrend.data.series.at(-1)?.momentum ?? 0} />
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  <MomentumChip point={companyLatest} />
                   <p className="text-xs text-[color:var(--ink-subtle)]">
-                    {formatMoney(companyTrend.data.series.at(-1)?.median_salary_annual ?? null)}
+                    {formatMoney(companyLatest?.median_salary_annual ?? null)}
                   </p>
                 </div>
               </div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                <SignalMetric label="Current jobs" value={(companyLatest?.job_count ?? 0).toLocaleString()} />
+                <SignalMetric label="Market share" value={`${(companyLatest?.market_share ?? 0).toFixed(2)}%`} />
+                <SignalMetric label="Evidence" value={`${companyActiveMonths}/${companyTrend.data.series.length}`} detail="active months" />
+              </div>
               <div className="mt-4">
-                <TrendSparkline points={companyTrend.data.series} />
+                <TrendSparkline
+                  points={companyTrend.data.series}
+                  ariaLabel={`${companyTrend.data.company_name} postings over time`}
+                />
               </div>
             </div>
 
             <div className="grid gap-4">
               <div className="rounded-[var(--radius-lg)] bg-[color:var(--surface-2)] p-5">
-                <p className="text-sm font-semibold text-[color:var(--ink)]">Top skills by month</p>
+                <p className="text-sm font-semibold text-[color:var(--ink)]">Skill mix in active months</p>
                 <div className="mt-4 space-y-3">
-                  {companyTrend.data.top_skills_by_month.slice(-4).map((snapshot) => (
-                    <div key={snapshot.month}>
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">
-                        {snapshot.month}
-                      </p>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {snapshot.skills.slice(0, 5).map((skill) => (
-                          <Chip
-                            key={`${snapshot.month}-${skill.skill}`}
-                            intent="neutral"
-                            size="sm"
-                          >
-                            {skill.skill} <span className="opacity-60">({skill.job_count})</span>
-                          </Chip>
-                        ))}
+                  {companySkillSnapshots.length ? (
+                    companySkillSnapshots.slice(-3).map((snapshot) => (
+                      <div key={snapshot.month}>
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">
+                          {formatMonth(snapshot.month)}
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {snapshot.skills.slice(0, 5).map((skill) => (
+                            <Chip key={`${snapshot.month}-${skill.skill}`} intent="neutral" size="sm">
+                              {skill.skill} <span className="opacity-60">({skill.job_count})</span>
+                            </Chip>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))
+                  ) : (
+                    <p className="text-sm text-[color:var(--ink-subtle)]">
+                      No skill mix available for this employer in the hosted window.
+                    </p>
+                  )}
                 </div>
               </div>
 
               <div className="rounded-[var(--radius-lg)] bg-[color:var(--surface-2)] p-5">
                 <p className="text-sm font-semibold text-[color:var(--ink)]">Similar hiring profiles</p>
                 <div className="mt-4 space-y-2">
-                  {companyTrend.data.similar_companies.map((company) => (
-                    <Card
-                      key={company.company_name}
-                      radius="md"
-                      elevation={0}
-                      interactive
-                      className="flex items-center justify-between bg-[color:var(--surface-1)] px-4 py-3"
-                    >
-                      <div>
-                        <p className="font-medium text-[color:var(--ink)]">{company.company_name}</p>
-                        <p className="text-xs text-[color:var(--ink-subtle)]">{company.job_count} jobs</p>
-                      </div>
-                      <p className="text-sm font-semibold text-[color:var(--brand)]">
-                        {(company.similarity_score * 100).toFixed(0)}%
-                      </p>
-                    </Card>
-                  ))}
+                  {companyTrend.data.similar_companies.length ? (
+                    companyTrend.data.similar_companies.map((company) => (
+                      <Card
+                        key={company.company_name}
+                        radius="md"
+                        elevation={0}
+                        interactive
+                        className="flex items-center justify-between bg-[color:var(--surface-1)] px-4 py-3"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate font-medium text-[color:var(--ink)]">{company.company_name}</p>
+                          <p className="text-xs text-[color:var(--ink-subtle)]">{company.job_count} jobs</p>
+                        </div>
+                        <p className="ml-3 shrink-0 text-sm font-semibold text-[color:var(--brand)]">
+                          {(company.similarity_score * 100).toFixed(0)}%
+                        </p>
+                      </Card>
+                    ))
+                  ) : (
+                    <p className="text-sm text-[color:var(--ink-subtle)]">
+                      Similar employers need at least one matching company profile.
+                    </p>
+                  )}
                 </div>
               </div>
             </div>

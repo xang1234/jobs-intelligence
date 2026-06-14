@@ -157,6 +157,8 @@ def _make_mock_engine(degraded=False, loaded=True):
                     "market_share": 6.2,
                     "median_salary_annual": 155000,
                     "momentum": 40.0,
+                    "momentum_status": "up",
+                    "momentum_label": "Rising",
                 },
             ],
             "latest": {
@@ -165,6 +167,8 @@ def _make_mock_engine(degraded=False, loaded=True):
                 "market_share": 6.2,
                 "median_salary_annual": 155000,
                 "momentum": 40.0,
+                "momentum_status": "up",
+                "momentum_label": "Rising",
             },
         },
     ]
@@ -530,25 +534,38 @@ class TestMarketIntelligenceEndpoints:
         mock_engine.db.get_overview.assert_called_once_with(months=12)
 
     def test_skill_trends(self, client, mock_engine):
-        resp = client.post("/api/trends/skills", json={"skills": ["Python"], "months": 12})
+        resp = client.post("/api/trends/skills", json={"skills": ["Python"], "months": 3})
         assert resp.status_code == 200
         data = resp.json()
         assert data[0]["skill"] == "Python"
         assert data[0]["latest"]["job_count"] == 14
+        assert data[0]["latest"]["momentum_status"] == "up"
+        assert data[0]["latest"]["momentum_label"] == "Rising"
+        mock_engine.db.get_skill_trends.assert_called_once()
+        assert mock_engine.db.get_skill_trends.call_args.kwargs["months"] == 3
 
     def test_role_trends(self, client, mock_engine):
-        resp = client.post("/api/trends/roles", json={"query": "data scientist", "months": 12})
+        resp = client.post("/api/trends/roles", json={"query": "data scientist", "months": 3})
         assert resp.status_code == 200
         data = resp.json()
         assert data["query"] == "data scientist"
         assert data["latest"]["momentum"] == 50.0
 
     def test_company_trends(self, client, mock_engine):
-        resp = client.get("/api/trends/companies/TestCo?months=12")
+        resp = client.get("/api/trends/companies/TestCo?months=3")
         assert resp.status_code == 200
         data = resp.json()
         assert data["company_name"] == "TestCo"
         assert data["similar_companies"][0]["company_name"] == "SimilarCo"
+
+    def test_trends_reject_windows_beyond_hosted_dataset(self, client):
+        skill_resp = client.post("/api/trends/skills", json={"skills": ["Python"], "months": 12})
+        role_resp = client.post("/api/trends/roles", json={"query": "data scientist", "months": 12})
+        company_resp = client.get("/api/trends/companies/TestCo?months=12")
+
+        assert skill_resp.status_code == 422
+        assert role_resp.status_code == 422
+        assert company_resp.status_code == 422
 
     def test_profile_match(self, client, mock_engine):
         resp = client.post(
