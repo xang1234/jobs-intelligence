@@ -68,6 +68,64 @@ def test_skill_trends_bucket_by_month_and_compute_momentum(empty_db: MCFDatabase
     assert [point["job_count"] for point in series] == [0, 1, 1]
     assert series[-1]["median_salary_annual"] == 126000
     assert series[-1]["momentum"] == 100.0
+    assert series[-1]["momentum_status"] == "up"
+    assert series[-1]["momentum_label"] == "Rising"
+
+
+def test_trend_momentum_status_marks_current_only_volume_as_new(empty_db: MCFDatabase):
+    _insert_job(
+        empty_db,
+        title="Inventory Assistant",
+        company_name="Alpha",
+        skills=["Inventory"],
+        posted_days_ago=posted_days_ago_for_month_offset(0, day=20),
+        salary_min=3000,
+        salary_max=4000,
+    )
+
+    latest = empty_db.get_skill_trends(["Inventory"], months=3)[0]["latest"]
+
+    assert latest["job_count"] == 1
+    assert latest["momentum"] == 100.0
+    assert latest["momentum_status"] == "new"
+    assert latest["momentum_label"] == "New signal"
+
+
+def test_trend_momentum_status_tracks_direction_when_baseline_exists(empty_db: MCFDatabase):
+    _insert_job(
+        empty_db,
+        title="Support Specialist",
+        company_name="Alpha",
+        skills=["Customer Service"],
+        posted_days_ago=posted_days_ago_for_month_offset(2, day=15),
+        salary_min=3000,
+        salary_max=4000,
+    )
+    _insert_job(
+        empty_db,
+        title="Support Specialist",
+        company_name="Beta",
+        skills=["Customer Service"],
+        posted_days_ago=posted_days_ago_for_month_offset(1, day=15),
+        salary_min=3000,
+        salary_max=4000,
+    )
+    for idx in range(3):
+        _insert_job(
+            empty_db,
+            title=f"Support Specialist {idx}",
+            company_name=f"Gamma {idx}",
+            skills=["Customer Service"],
+            posted_days_ago=posted_days_ago_for_month_offset(0, day=10 + idx),
+            salary_min=3000,
+            salary_max=4000,
+        )
+
+    latest = empty_db.get_skill_trends(["Customer Service"], months=3)[0]["latest"]
+
+    assert latest["momentum"] == 200.0
+    assert latest["momentum_status"] == "up"
+    assert latest["momentum_label"] == "Rising"
 
 
 def test_role_trend_uses_annual_salary_median(empty_db: MCFDatabase):

@@ -2411,13 +2411,15 @@ class MCFDatabase:
         """
         Compute month-over-trailing-3-month-average momentum in percent.
 
-        When there is no previous volume baseline, treat a non-zero current value
-        as a new emergence with +100 momentum.
+        Keep the legacy numeric momentum for compatibility, but annotate whether
+        that value reflects real movement or just a newly observed signal.
         """
         for idx, point in enumerate(series):
             history = [series[j]["job_count"] for j in range(max(0, idx - 3), idx)]
             if not history:
                 point["momentum"] = 0.0
+                point["momentum_status"] = "insufficient_baseline"
+                point["momentum_label"] = "No prior baseline"
                 continue
 
             baseline = sum(history) / len(history)
@@ -2425,8 +2427,24 @@ class MCFDatabase:
 
             if baseline == 0:
                 point["momentum"] = 100.0 if current > 0 else 0.0
+                if current > 0:
+                    point["momentum_status"] = "new"
+                    point["momentum_label"] = "New signal"
+                else:
+                    point["momentum_status"] = "insufficient_baseline"
+                    point["momentum_label"] = "No prior baseline"
             else:
-                point["momentum"] = round(((current - baseline) / baseline) * 100, 2)
+                momentum = round(((current - baseline) / baseline) * 100, 2)
+                point["momentum"] = momentum
+                if momentum >= 15:
+                    point["momentum_status"] = "up"
+                    point["momentum_label"] = "Rising"
+                elif momentum <= -15:
+                    point["momentum_status"] = "down"
+                    point["momentum_label"] = "Cooling"
+                else:
+                    point["momentum_status"] = "stable"
+                    point["momentum_label"] = "Steady"
 
     @staticmethod
     def _build_filter_conditions(

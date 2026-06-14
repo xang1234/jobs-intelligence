@@ -14,7 +14,7 @@ translates between the HTTP layer and the engine layer.
 
 from datetime import date
 from enum import Enum
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -264,14 +264,14 @@ class SkillTrendRequest(TrendFilters):
     """Request for one or more skill time series."""
 
     skills: list[str] = Field(..., min_length=1, max_length=3)
-    months: int = Field(12, ge=3, le=24)
+    months: int = Field(3, ge=1, le=3)
 
 
 class RoleTrendRequest(TrendFilters):
     """Request for a role/query trend series."""
 
     query: str = Field(..., min_length=1, max_length=200)
-    months: int = Field(12, ge=3, le=24)
+    months: int = Field(3, ge=1, le=3)
 
 
 class ProfileMatchRequest(BaseModel):
@@ -616,6 +616,8 @@ class TrendPoint(BaseModel):
     market_share: float
     median_salary_annual: Optional[int] = None
     momentum: float
+    momentum_status: Literal["up", "down", "stable", "new", "insufficient_baseline"] = "stable"
+    momentum_label: str = "Steady"
 
 
 class SkillTrendSeries(BaseModel):

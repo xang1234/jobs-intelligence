@@ -244,6 +244,8 @@ export interface TrendPoint {
   market_share: number
   median_salary_annual: number | null
   momentum: number
+  momentum_status?: 'up' | 'down' | 'stable' | 'new' | 'insufficient_baseline'
+  momentum_label?: string
 }
 
 export interface SkillTrendSeries {

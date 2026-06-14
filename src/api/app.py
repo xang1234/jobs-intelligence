@@ -682,7 +682,7 @@ def _register_routes(app: FastAPI) -> None:
     @app.get("/api/trends/companies/{company_name}", response_model=CompanyTrendResponse)
     async def company_trends(
         company_name: str,
-        months: int = Query(12, ge=3, le=24, description="Number of months to analyze"),
+        months: int = Query(3, ge=1, le=3, description="Number of months to analyze"),
         engine: SemanticSearchEngine = Depends(get_engine),
     ) -> CompanyTrendResponse:
         """Get hiring trend, skill mix, and similar employers for one company."""
