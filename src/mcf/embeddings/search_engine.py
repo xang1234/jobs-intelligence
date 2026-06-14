@@ -702,6 +702,12 @@ class SemanticSearchEngine:
         # Fallback: on-the-fly single centroid via jobs index
         return self._find_similar_companies_fallback(request)
 
+    def _get_company_stats_bulk(self, company_names: list[str]) -> dict[str, dict]:
+        bulk_getter = getattr(self.db, "get_company_stats_bulk", None)
+        if callable(bulk_getter):
+            return bulk_getter(company_names)
+        return {company_name: self.db.get_company_stats(company_name) for company_name in company_names}
+
     def _find_similar_companies_multi_centroid(
         self,
         request: CompanySimilarityRequest,
@@ -740,9 +746,10 @@ class SemanticSearchEngine:
         sorted_companies = sorted(company_scores.items(), key=lambda x: x[1], reverse=True)[: request.limit]
 
         # Enrich with company stats
+        company_stats = self._get_company_stats_bulk([company_name for company_name, _ in sorted_companies])
         results_list: list[CompanySimilarity] = []
         for company_name, score in sorted_companies:
-            stats = self.db.get_company_stats(company_name)
+            stats = company_stats.get(company_name, {})
             results_list.append(
                 CompanySimilarity(
                     company_name=company_name,
@@ -813,9 +820,10 @@ class SemanticSearchEngine:
         company_avg.sort(key=lambda x: x[1], reverse=True)
 
         # Enrich with company stats
+        company_stats = self._get_company_stats_bulk([company_name for company_name, _ in company_avg[: request.limit]])
         results: list[CompanySimilarity] = []
         for company_name, score in company_avg[: request.limit]:
-            stats = self.db.get_company_stats(company_name)
+            stats = company_stats.get(company_name, {})
             results.append(
                 CompanySimilarity(
                     company_name=company_name,

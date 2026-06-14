@@ -128,6 +128,34 @@ def test_trend_momentum_status_tracks_direction_when_baseline_exists(empty_db: M
     assert latest["momentum_label"] == "Rising"
 
 
+def test_skill_trends_aggregate_multiple_skills_from_one_scan(empty_db: MCFDatabase):
+    _insert_job(
+        empty_db,
+        title="Platform Engineer",
+        company_name="Alpha",
+        skills=["Python", "SQL"],
+        posted_days_ago=posted_days_ago_for_month_offset(0, day=20),
+        salary_min=9000,
+        salary_max=12000,
+    )
+    _insert_job(
+        empty_db,
+        title="Support Engineer",
+        company_name="Beta",
+        skills=["Customer Service", "SQL"],
+        posted_days_ago=posted_days_ago_for_month_offset(0, day=15),
+        salary_min=4500,
+        salary_max=6500,
+    )
+
+    with patch.object(empty_db, "_fetch_trend_rows", wraps=empty_db._fetch_trend_rows) as fetch_rows:
+        trends = empty_db.get_skill_trends(["Python", "SQL", "Customer Service"], months=3)
+
+    assert fetch_rows.call_count == 1
+    latest_counts = {trend["skill"]: trend["latest"]["job_count"] for trend in trends}
+    assert latest_counts == {"Python": 1, "SQL": 2, "Customer Service": 1}
+
+
 def test_role_trend_uses_annual_salary_median(empty_db: MCFDatabase):
     _insert_job(
         empty_db,
@@ -172,6 +200,44 @@ def test_company_trend_top_skills_include_cluster_id(empty_db: MCFDatabase):
     assert trend["top_skills_by_month"]
     latest_skills = next(item for item in trend["top_skills_by_month"] if item["skills"])
     assert latest_skills["skills"][0]["cluster_id"] is None
+
+
+def test_company_stats_bulk_returns_counts_salary_and_skills(empty_db: MCFDatabase):
+    _insert_job(
+        empty_db,
+        title="Data Scientist",
+        company_name="Insight Labs",
+        skills=["Python", "SQL"],
+        posted_days_ago=posted_days_ago_for_month_offset(0, day=20),
+        salary_min=10000,
+        salary_max=14000,
+    )
+    _insert_job(
+        empty_db,
+        title="Analytics Engineer",
+        company_name="Insight Labs",
+        skills=["Python", "Airflow"],
+        posted_days_ago=posted_days_ago_for_month_offset(0, day=15),
+        salary_min=8000,
+        salary_max=10000,
+    )
+    _insert_job(
+        empty_db,
+        title="Support Specialist",
+        company_name="Support Co",
+        skills=["Customer Service"],
+        posted_days_ago=posted_days_ago_for_month_offset(0, day=12),
+        salary_min=3000,
+        salary_max=4000,
+    )
+
+    stats = empty_db.get_company_stats_bulk(["Insight Labs", "Support Co", "Missing Co"])
+
+    assert stats["Insight Labs"]["job_count"] == 2
+    assert stats["Insight Labs"]["avg_salary"] == 126000
+    assert stats["Insight Labs"]["top_skills"][0] == "Python"
+    assert stats["Support Co"]["job_count"] == 1
+    assert stats["Missing Co"]["job_count"] == 0
 
 
 def test_overview_avoids_nested_trend_queries(empty_db: MCFDatabase):

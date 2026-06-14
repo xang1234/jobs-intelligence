@@ -101,10 +101,14 @@ export async function findSimilarCompanies(req: CompanySimilarityRequest): Promi
   return data
 }
 
-export async function getCompanyTrend(companyName: string, months = 12): Promise<CompanyTrendResponse> {
+export async function getCompanyTrend(
+  companyName: string,
+  months = 3,
+  includeSimilar = true,
+): Promise<CompanyTrendResponse> {
   const { data } = await client.get<CompanyTrendResponse>(
     `/api/trends/companies/${encodeURIComponent(companyName)}`,
-    { params: { months } },
+    { params: { months, include_similar: includeSimilar } },
   )
   return data
 }
@@ -136,7 +140,7 @@ export async function getCareerDeltaScenarioDetail(scenarioId: string): Promise<
   return data
 }
 
-export async function getOverview(months = 12): Promise<OverviewResponse> {
+export async function getOverview(months = 3): Promise<OverviewResponse> {
   const { data } = await client.get<OverviewResponse>('/api/overview', {
     params: { months },
   })

@@ -14,17 +14,19 @@ Usage:
 """
 
 import asyncio
+import copy
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from functools import partial
 from pathlib import Path
-from typing import Optional
+from typing import Awaitable, Callable, Optional, TypeVar
 
 from cachetools import TTLCache
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from ..mcf.career_delta import (
     CareerDeltaDependencies,
@@ -89,6 +91,10 @@ _search_engine: Optional[SemanticSearchEngine] = None
 _engine_executor = ThreadPoolExecutor(max_workers=1)
 MATCH_LAB_RESPONSE_CACHE_TTL_SECONDS = 300
 MATCH_LAB_RESPONSE_CACHE_MAX_ENTRIES = 128
+PUBLIC_RESPONSE_CACHE_TTL_SECONDS = 300
+PUBLIC_RESPONSE_CACHE_MAX_ENTRIES = 256
+
+T = TypeVar("T")
 
 
 class _CareerDeltaTaxonomyHelper:
@@ -147,6 +153,42 @@ def _get_match_lab_response_cache(engine: SemanticSearchEngine, name: str) -> TT
     )
     setattr(engine, attr, cache)
     return cache
+
+
+def _get_public_response_cache(engine: SemanticSearchEngine) -> TTLCache:
+    """Lazily construct a short-lived cache for expensive read-only API responses."""
+    cached = getattr(engine, "_public_response_cache", None)
+    if isinstance(cached, TTLCache):
+        return cached
+
+    cache = TTLCache(
+        maxsize=PUBLIC_RESPONSE_CACHE_MAX_ENTRIES,
+        ttl=PUBLIC_RESPONSE_CACHE_TTL_SECONDS,
+    )
+    setattr(engine, "_public_response_cache", cache)
+    return cache
+
+
+def _clone_cached_response(value: T) -> T:
+    """Return a defensive copy of a cached Pydantic/list/dict response."""
+    if isinstance(value, BaseModel):
+        return value.model_copy(deep=True)  # type: ignore[return-value]
+    return copy.deepcopy(value)
+
+
+async def _cached_public_response(
+    engine: SemanticSearchEngine,
+    cache_key: str,
+    producer: Callable[[], Awaitable[T]],
+) -> T:
+    cache = _get_public_response_cache(engine)
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return _clone_cached_response(cached)
+
+    response = await producer()
+    cache[cache_key] = _clone_cached_response(response)
+    return response
 
 
 def _request_cache_key(prefix: str, request) -> str:
@@ -569,11 +611,19 @@ def _register_routes(app: FastAPI) -> None:
         Returns skills with job counts and optional cluster IDs for color coding.
         Useful for word clouds, bar charts, or skill distribution analysis.
         """
-        loop = asyncio.get_running_loop()
-        raw = await loop.run_in_executor(None, partial(engine.get_skill_cloud, min_jobs=min_jobs, limit=limit))
-        return SkillCloudResponse(
-            items=[SkillCloudItem(**item) for item in raw["items"]],
-            total_unique_skills=raw["total_unique_skills"],
+
+        async def produce() -> SkillCloudResponse:
+            loop = asyncio.get_running_loop()
+            raw = await loop.run_in_executor(None, partial(engine.get_skill_cloud, min_jobs=min_jobs, limit=limit))
+            return SkillCloudResponse(
+                items=[SkillCloudItem(**item) for item in raw["items"]],
+                total_unique_skills=raw["total_unique_skills"],
+            )
+
+        return await _cached_public_response(
+            engine,
+            f"skill_cloud:{min_jobs}:{limit}",
+            produce,
         )
 
     @app.get("/api/skills/related/{skill}", response_model=RelatedSkillsResponse)
@@ -605,10 +655,18 @@ def _register_routes(app: FastAPI) -> None:
         engine: SemanticSearchEngine = Depends(get_engine),
     ) -> list[CompanySimilarity]:
         """Find companies with similar job profiles."""
-        internal_req = request.to_internal()
-        loop = asyncio.get_running_loop()
-        internal_results = await loop.run_in_executor(None, engine.find_similar_companies, internal_req)
-        return [CompanySimilarity.from_internal(r) for r in internal_results]
+
+        async def produce() -> list[CompanySimilarity]:
+            internal_req = request.to_internal()
+            loop = asyncio.get_running_loop()
+            internal_results = await loop.run_in_executor(None, engine.find_similar_companies, internal_req)
+            return [CompanySimilarity.from_internal(r) for r in internal_results]
+
+        return await _cached_public_response(
+            engine,
+            _request_cache_key("similar_companies", request),
+            produce,
+        )
 
     # -- Market intelligence endpoints ----------------------------------------
 
@@ -618,14 +676,22 @@ def _register_routes(app: FastAPI) -> None:
         engine: SemanticSearchEngine = Depends(get_engine),
     ) -> OverviewResponse:
         """Get summary cards and top movers for the overview page."""
-        loop = asyncio.get_running_loop()
-        raw = await loop.run_in_executor(None, partial(engine.db.get_overview, months=months))
-        return OverviewResponse(
-            headline_metrics=OverviewMetric(**raw["headline_metrics"]),
-            rising_skills=[MomentumCard(**item) for item in raw["rising_skills"]],
-            rising_companies=[MomentumCard(**item) for item in raw["rising_companies"]],
-            salary_movement=SalaryMovement(**raw["salary_movement"]),
-            market_insights=[InsightCard(**item) for item in raw["market_insights"]],
+
+        async def produce() -> OverviewResponse:
+            loop = asyncio.get_running_loop()
+            raw = await loop.run_in_executor(None, partial(engine.db.get_overview, months=months))
+            return OverviewResponse(
+                headline_metrics=OverviewMetric(**raw["headline_metrics"]),
+                rising_skills=[MomentumCard(**item) for item in raw["rising_skills"]],
+                rising_companies=[MomentumCard(**item) for item in raw["rising_companies"]],
+                salary_movement=SalaryMovement(**raw["salary_movement"]),
+                market_insights=[InsightCard(**item) for item in raw["market_insights"]],
+            )
+
+        return await _cached_public_response(
+            engine,
+            f"overview:{months}",
+            produce,
         )
 
     @app.post("/api/trends/skills", response_model=list[SkillTrendSeries])
@@ -634,26 +700,34 @@ def _register_routes(app: FastAPI) -> None:
         engine: SemanticSearchEngine = Depends(get_engine),
     ) -> list[SkillTrendSeries]:
         """Compare monthly demand trends for up to three skills."""
-        loop = asyncio.get_running_loop()
-        raw = await loop.run_in_executor(
-            None,
-            partial(
-                engine.db.get_skill_trends,
-                skills=request.skills,
-                months=request.months,
-                company_name=request.company,
-                employment_type=request.employment_type,
-                region=request.region,
-            ),
-        )
-        return [
-            SkillTrendSeries(
-                skill=item["skill"],
-                series=[TrendPoint(**point) for point in item["series"]],
-                latest=TrendPoint(**item["latest"]) if item.get("latest") else None,
+
+        async def produce() -> list[SkillTrendSeries]:
+            loop = asyncio.get_running_loop()
+            raw = await loop.run_in_executor(
+                None,
+                partial(
+                    engine.db.get_skill_trends,
+                    skills=request.skills,
+                    months=request.months,
+                    company_name=request.company,
+                    employment_type=request.employment_type,
+                    region=request.region,
+                ),
             )
-            for item in raw
-        ]
+            return [
+                SkillTrendSeries(
+                    skill=item["skill"],
+                    series=[TrendPoint(**point) for point in item["series"]],
+                    latest=TrendPoint(**item["latest"]) if item.get("latest") else None,
+                )
+                for item in raw
+            ]
+
+        return await _cached_public_response(
+            engine,
+            _request_cache_key("skill_trends", request),
+            produce,
+        )
 
     @app.post("/api/trends/roles", response_model=RoleTrendResponse)
     async def role_trends(
@@ -661,53 +735,74 @@ def _register_routes(app: FastAPI) -> None:
         engine: SemanticSearchEngine = Depends(get_engine),
     ) -> RoleTrendResponse:
         """Get monthly trend data for a role/query string."""
-        loop = asyncio.get_running_loop()
-        raw = await loop.run_in_executor(
-            None,
-            partial(
-                engine.db.get_role_trend,
-                query=request.query,
-                months=request.months,
-                company_name=request.company,
-                employment_type=request.employment_type,
-                region=request.region,
-            ),
-        )
-        return RoleTrendResponse(
-            query=raw["query"],
-            series=[TrendPoint(**point) for point in raw["series"]],
-            latest=TrendPoint(**raw["latest"]) if raw.get("latest") else None,
+
+        async def produce() -> RoleTrendResponse:
+            loop = asyncio.get_running_loop()
+            raw = await loop.run_in_executor(
+                None,
+                partial(
+                    engine.db.get_role_trend,
+                    query=request.query,
+                    months=request.months,
+                    company_name=request.company,
+                    employment_type=request.employment_type,
+                    region=request.region,
+                ),
+            )
+            return RoleTrendResponse(
+                query=raw["query"],
+                series=[TrendPoint(**point) for point in raw["series"]],
+                latest=TrendPoint(**raw["latest"]) if raw.get("latest") else None,
+            )
+
+        return await _cached_public_response(
+            engine,
+            _request_cache_key("role_trends", request),
+            produce,
         )
 
     @app.get("/api/trends/companies/{company_name}", response_model=CompanyTrendResponse)
     async def company_trends(
         company_name: str,
         months: int = Query(3, ge=1, le=3, description="Number of months to analyze"),
+        include_similar: bool = Query(True, description="Include similar employer profiles"),
         engine: SemanticSearchEngine = Depends(get_engine),
     ) -> CompanyTrendResponse:
         """Get hiring trend, skill mix, and similar employers for one company."""
-        loop = asyncio.get_running_loop()
-        trend_raw, similar_raw = await asyncio.gather(
-            loop.run_in_executor(None, partial(engine.db.get_company_trend, company_name=company_name, months=months)),
-            loop.run_in_executor(
+
+        async def produce() -> CompanyTrendResponse:
+            loop = asyncio.get_running_loop()
+            trend_raw = await loop.run_in_executor(
                 None,
-                partial(
-                    engine.find_similar_companies,
-                    CompanySimilarityRequest(company_name=company_name, limit=6).to_internal(),
-                ),
-            ),
-        )
-        return CompanyTrendResponse(
-            company_name=trend_raw["company_name"],
-            series=[TrendPoint(**point) for point in trend_raw["series"]],
-            top_skills_by_month=[
-                MonthlySkillSnapshot(
-                    month=item["month"],
-                    skills=[SkillCloudItem(**skill) for skill in item["skills"]],
+                partial(engine.db.get_company_trend, company_name=company_name, months=months),
+            )
+            if include_similar:
+                similar_raw = await loop.run_in_executor(
+                    None,
+                    partial(
+                        engine.find_similar_companies,
+                        CompanySimilarityRequest(company_name=company_name, limit=6).to_internal(),
+                    ),
                 )
-                for item in trend_raw["top_skills_by_month"]
-            ],
-            similar_companies=[CompanySimilarity.from_internal(item) for item in similar_raw],
+            else:
+                similar_raw = []
+            return CompanyTrendResponse(
+                company_name=trend_raw["company_name"],
+                series=[TrendPoint(**point) for point in trend_raw["series"]],
+                top_skills_by_month=[
+                    MonthlySkillSnapshot(
+                        month=item["month"],
+                        skills=[SkillCloudItem(**skill) for skill in item["skills"]],
+                    )
+                    for item in trend_raw["top_skills_by_month"]
+                ],
+                similar_companies=[CompanySimilarity.from_internal(item) for item in similar_raw],
+            )
+
+        return await _cached_public_response(
+            engine,
+            f"company_trends:{company_name.lower()}:{months}:{include_similar}",
+            produce,
         )
 
     @app.post("/api/match/profile", response_model=ProfileMatchResponse)
@@ -812,18 +907,26 @@ def _register_routes(app: FastAPI) -> None:
         engine: SemanticSearchEngine = Depends(get_engine),
     ) -> StatsResponse:
         """Get system statistics (index size, coverage, etc.)."""
-        loop = asyncio.get_running_loop()
-        raw = await loop.run_in_executor(_engine_executor, engine.get_stats)
-        emb = raw.get("embedding_stats", {})
-        idx = raw.get("index_stats", {})
-        return StatsResponse(
-            total_jobs=emb.get("total_jobs", 0),
-            jobs_with_embeddings=emb.get("job_embeddings", 0),
-            embedding_coverage_pct=emb.get("coverage_pct", 0.0),
-            unique_skills=emb.get("skill_embeddings", 0),
-            unique_companies=emb.get("unique_companies", 0),
-            index_size_mb=idx.get("index_size_mb", 0.0),
-            model_version=raw.get("model_version", "unknown"),
+
+        async def produce() -> StatsResponse:
+            loop = asyncio.get_running_loop()
+            raw = await loop.run_in_executor(_engine_executor, engine.get_stats)
+            emb = raw.get("embedding_stats", {})
+            idx = raw.get("index_stats", {})
+            return StatsResponse(
+                total_jobs=emb.get("total_jobs", 0),
+                jobs_with_embeddings=emb.get("job_embeddings", 0),
+                embedding_coverage_pct=emb.get("coverage_pct", 0.0),
+                unique_skills=emb.get("skill_embeddings", 0),
+                unique_companies=emb.get("unique_companies", 0),
+                index_size_mb=idx.get("index_size_mb", 0.0),
+                model_version=raw.get("model_version", "unknown"),
+            )
+
+        return await _cached_public_response(
+            engine,
+            "stats",
+            produce,
         )
 
     @app.get("/api/analytics/popular")
@@ -833,8 +936,16 @@ def _register_routes(app: FastAPI) -> None:
         engine: SemanticSearchEngine = Depends(get_engine),
     ) -> list[dict]:
         """Get most popular search queries."""
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, partial(engine.db.get_popular_queries, days=days, limit=limit))
+
+        async def produce() -> list[dict]:
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, partial(engine.db.get_popular_queries, days=days, limit=limit))
+
+        return await _cached_public_response(
+            engine,
+            f"popular_queries:{days}:{limit}",
+            produce,
+        )
 
     @app.get("/api/analytics/performance")
     async def performance_stats(
@@ -842,8 +953,16 @@ def _register_routes(app: FastAPI) -> None:
         engine: SemanticSearchEngine = Depends(get_engine),
     ) -> dict:
         """Get search latency percentiles (p50, p90, p95, p99)."""
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, partial(engine.db.get_search_latency_percentiles, days=days))
+
+        async def produce() -> dict:
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, partial(engine.db.get_search_latency_percentiles, days=days))
+
+        return await _cached_public_response(
+            engine,
+            f"performance_stats:{days}",
+            produce,
+        )
 
     @app.get("/health", response_model=HealthResponse)
     async def health_check() -> HealthResponse:

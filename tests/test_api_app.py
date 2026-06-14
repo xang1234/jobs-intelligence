@@ -439,6 +439,15 @@ class TestSkillCloudEndpoint:
         assert data["total_unique_skills"] == 1200
         mock_engine.get_skill_cloud.assert_called_once()
 
+    def test_skill_cloud_caches_identical_requests(self, client, mock_engine):
+        first = client.get("/api/skills/cloud?min_jobs=10&limit=80")
+        second = client.get("/api/skills/cloud?min_jobs=10&limit=80")
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert first.json() == second.json()
+        mock_engine.get_skill_cloud.assert_called_once()
+
     def test_skill_cloud_with_params(self, client, mock_engine):
         resp = client.get("/api/skills/cloud?min_jobs=100&limit=50")
         assert resp.status_code == 200
@@ -515,6 +524,17 @@ class TestCompanySimilarityEndpoint:
         assert data[0]["company_name"] == "SimilarCo"
         assert data[0]["similarity_score"] == 0.85
 
+    def test_similar_companies_caches_identical_requests(self, client, mock_engine):
+        payload = {"company_name": "Google", "limit": 6}
+
+        first = client.post("/api/companies/similar", json=payload)
+        second = client.post("/api/companies/similar", json=payload)
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert first.json() == second.json()
+        mock_engine.find_similar_companies.assert_called_once()
+
     def test_empty_company_rejected(self, client):
         resp = client.post(
             "/api/companies/similar",
@@ -533,6 +553,15 @@ class TestMarketIntelligenceEndpoints:
         assert data["headline_metrics"]["total_jobs"] == 50000
         mock_engine.db.get_overview.assert_called_once_with(months=12)
 
+    def test_overview_caches_identical_requests(self, client, mock_engine):
+        first = client.get("/api/overview?months=3")
+        second = client.get("/api/overview?months=3")
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert first.json() == second.json()
+        mock_engine.db.get_overview.assert_called_once_with(months=3)
+
     def test_skill_trends(self, client, mock_engine):
         resp = client.post("/api/trends/skills", json={"skills": ["Python"], "months": 3})
         assert resp.status_code == 200
@@ -543,6 +572,17 @@ class TestMarketIntelligenceEndpoints:
         assert data[0]["latest"]["momentum_label"] == "Rising"
         mock_engine.db.get_skill_trends.assert_called_once()
         assert mock_engine.db.get_skill_trends.call_args.kwargs["months"] == 3
+
+    def test_skill_trends_cache_identical_requests(self, client, mock_engine):
+        payload = {"skills": ["Python"], "months": 3}
+
+        first = client.post("/api/trends/skills", json=payload)
+        second = client.post("/api/trends/skills", json=payload)
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert first.json() == second.json()
+        mock_engine.db.get_skill_trends.assert_called_once()
 
     def test_role_trends(self, client, mock_engine):
         resp = client.post("/api/trends/roles", json={"query": "data scientist", "months": 3})
@@ -557,6 +597,16 @@ class TestMarketIntelligenceEndpoints:
         data = resp.json()
         assert data["company_name"] == "TestCo"
         assert data["similar_companies"][0]["company_name"] == "SimilarCo"
+
+    def test_company_trends_can_defer_similar_profiles(self, client, mock_engine):
+        resp = client.get("/api/trends/companies/TestCo?months=3&include_similar=false")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["company_name"] == "TestCo"
+        assert data["similar_companies"] == []
+        mock_engine.db.get_company_trend.assert_called_once()
+        mock_engine.find_similar_companies.assert_not_called()
 
     def test_trends_reject_windows_beyond_hosted_dataset(self, client):
         skill_resp = client.post("/api/trends/skills", json={"skills": ["Python"], "months": 12})

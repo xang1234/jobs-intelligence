@@ -14,9 +14,10 @@ interface MobileNavProps {
   open: boolean
   onClose: () => void
   items: ReadonlyArray<NavItem>
+  onPrefetch?: (to: string) => void
 }
 
-export default function MobileNav({ open, onClose, items }: MobileNavProps) {
+export default function MobileNav({ open, onClose, items, onPrefetch }: MobileNavProps) {
   return (
     <Transition show={open} as={Fragment}>
       <Dialog onClose={onClose} className="relative z-[65] lg:hidden">
@@ -60,6 +61,8 @@ export default function MobileNav({ open, onClose, items }: MobileNavProps) {
                     key={item.to}
                     to={item.to}
                     end={item.end}
+                    onMouseEnter={() => onPrefetch?.(item.to)}
+                    onFocus={() => onPrefetch?.(item.to)}
                     onClick={onClose}
                     className={({ isActive }) =>
                       `rounded-[var(--radius-md)] px-4 py-3 text-sm font-semibold transition ${
