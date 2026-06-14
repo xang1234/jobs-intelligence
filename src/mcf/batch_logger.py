@@ -106,8 +106,8 @@ class BatchLogger:
         except Exception as e:
             logger.error(f"Failed to flush {count} attempts: {e}")
             raise
-        finally:
-            self._buffer.clear()
+
+        self._buffer.clear()
 
         return count
 

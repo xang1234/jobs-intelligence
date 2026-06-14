@@ -21,7 +21,7 @@ import hashlib
 import logging
 import sqlite3
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Optional
+from typing import Awaitable, Callable, Optional, TypeVar
 
 from tenacity import RetryError
 
@@ -54,6 +54,14 @@ DEFAULT_BATCH_SIZE = 250
 BOUND_DISCOVERY_WINDOW = 125
 BOUND_DISCOVERY_STEP = 25
 MAX_SEQUENCE = 9_999_999
+DATABASE_CONNECTION_ERROR_MARKERS = (
+    "connection is closed",
+    "connection is lost",
+    "closed database",
+    "server closed the connection",
+    "terminating connection",
+)
+T = TypeVar("T")
 
 
 @dataclass
@@ -146,8 +154,7 @@ class HistoricalScraper:
         """Async context manager entry."""
         self._client = MCFClient(requests_per_second=self.initial_rps)
         await self._client.__aenter__()
-        self._write_conn = self.db._connect(write_optimized=True)
-        self.batch_logger.conn = self._write_conn
+        self._open_write_connection()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
@@ -155,16 +162,57 @@ class HistoricalScraper:
         # Flush any pending batch logger entries
         if self._write_conn:
             try:
-                self.batch_logger.flush()
-                self._write_conn.commit()
+                self._with_write_retry(
+                    lambda: self.batch_logger.flush(),
+                    context="final attempt flush",
+                )
             finally:
-                self._write_conn.close()
-                self._write_conn = None
-                self.batch_logger.conn = None
+                self._close_write_connection()
 
         if self._client:
             await self._client.__aexit__(exc_type, exc_val, exc_tb)
             self._client = None
+
+    def _open_write_connection(self) -> None:
+        """Open the long-lived writer connection used by scraper batches."""
+        self._write_conn = self.db._connect(write_optimized=True)
+        self.batch_logger.conn = self._write_conn
+
+    def _close_write_connection(self) -> None:
+        """Close the long-lived writer connection and detach batch logging."""
+        if self._write_conn:
+            try:
+                self._write_conn.close()
+            except Exception as exc:
+                logger.debug("Ignoring error while closing scraper writer connection: %s", exc)
+        self._write_conn = None
+        self.batch_logger.conn = None
+
+    @staticmethod
+    def _is_database_connection_error(exc: Exception) -> bool:
+        """Return True for transient closed/lost database connection errors."""
+        message = str(exc).lower()
+        return any(marker in message for marker in DATABASE_CONNECTION_ERROR_MARKERS)
+
+    def _reopen_write_connection(self, *, context: str, reason: Exception) -> None:
+        logger.warning("Reopening scraper writer after %s failed: %s", context, reason)
+        self._close_write_connection()
+        self._open_write_connection()
+
+    def _with_write_retry(self, operation: Callable[[], T], *, context: str) -> T:
+        """Run a database write, reconnecting once if the writer was dropped."""
+        for attempt in range(2):
+            try:
+                result = operation()
+                self._mark_progress_committed()
+                return result
+            except Exception as exc:
+                if attempt == 0 and self._is_database_connection_error(exc):
+                    self._reopen_write_connection(context=context, reason=exc)
+                    continue
+                raise
+
+        raise RuntimeError(f"Unreachable write retry state for {context}")
 
     @staticmethod
     def job_id_to_uuid(job_id: str) -> str:
@@ -434,25 +482,29 @@ class HistoricalScraper:
 
         # Create new session if needed
         if session_id is None and not dry_run:
-            session_id = self.db.create_historical_session(
-                year,
-                start_seq,
-                end_seq,
-                conn=self._write_conn,
+            session_id = self._with_write_retry(
+                lambda: self.db.create_historical_session(
+                    year,
+                    start_seq,
+                    end_seq,
+                    conn=self._write_conn,
+                ),
+                context=f"create historical session for {year}",
             )
-            self._mark_progress_committed()
             logger.info(f"Created new session {session_id} for year {year}")
         elif session_id and not dry_run and should_discover_bounds:
-            self.db.update_historical_progress(
-                session_id,
-                start_seq - 1,
-                jobs_found,
-                jobs_not_found,
-                consecutive_not_found,
-                end_seq=end_seq,
-                conn=self._write_conn,
+            self._with_write_retry(
+                lambda: self.db.update_historical_progress(
+                    session_id,
+                    start_seq - 1,
+                    jobs_found,
+                    jobs_not_found,
+                    consecutive_not_found,
+                    end_seq=end_seq,
+                    conn=self._write_conn,
+                ),
+                context=f"update discovered bound for {year}",
             )
-            self._mark_progress_committed()
 
         current_seq = start_seq
         checkpoint_interval = 100  # Save progress every N jobs
@@ -486,7 +538,10 @@ class HistoricalScraper:
 
                     if job:
                         # Save to database
-                        is_new, _ = self.db.upsert_job(job, conn=self._write_conn)
+                        is_new, _ = self._with_write_retry(
+                            lambda: self.db.upsert_job(job, conn=self._write_conn),
+                            context=f"upsert job {year}-{current_seq}",
+                        )
                         jobs_found += 1
                         consecutive_not_found = 0
 
@@ -545,6 +600,9 @@ class HistoricalScraper:
                         consecutive_not_found += 1
 
                 except Exception as e:
+                    if self._is_database_connection_error(e):
+                        logger.exception("Database write failed at %s-%s after retry", year, current_seq)
+                        raise
                     # Catch-all for unexpected errors - log and continue
                     logger.exception(f"Unexpected error at {year}-{current_seq}: {e}")
                     self.batch_logger.log(year, current_seq, "error", str(e))
@@ -558,17 +616,22 @@ class HistoricalScraper:
 
                 # Checkpoint periodically
                 if session_id and (current_seq - start_seq) % checkpoint_interval == 0:
-                    self.db.update_historical_progress(
-                        session_id,
-                        current_seq,
-                        jobs_found,
-                        jobs_not_found,
-                        consecutive_not_found,
-                        end_seq=end_seq,
-                        conn=self._write_conn,
+                    self._with_write_retry(
+                        lambda: self.db.update_historical_progress(
+                            session_id,
+                            current_seq,
+                            jobs_found,
+                            jobs_not_found,
+                            consecutive_not_found,
+                            end_seq=end_seq,
+                            conn=self._write_conn,
+                        ),
+                        context=f"checkpoint progress for {year}-{current_seq}",
                     )
-                    self.batch_logger.flush()
-                    self._mark_progress_committed()
+                    self._with_write_retry(
+                        lambda: self.batch_logger.flush(),
+                        context=f"checkpoint attempt flush for {year}-{current_seq}",
+                    )
 
                     # Progress callback
                     if progress_callback:
@@ -585,26 +648,32 @@ class HistoricalScraper:
 
         finally:
             # Flush batch logger
-            self.batch_logger.flush()
-            self._mark_progress_committed()
+            self._with_write_retry(
+                lambda: self.batch_logger.flush(),
+                context=f"final attempt flush for {year}",
+            )
 
             # Final progress update
             if session_id:
-                self.db.update_historical_progress(
-                    session_id,
-                    current_seq,
-                    jobs_found,
-                    jobs_not_found,
-                    consecutive_not_found,
-                    end_seq=end_seq,
-                    conn=self._write_conn,
+                self._with_write_retry(
+                    lambda: self.db.update_historical_progress(
+                        session_id,
+                        current_seq,
+                        jobs_found,
+                        jobs_not_found,
+                        consecutive_not_found,
+                        end_seq=end_seq,
+                        conn=self._write_conn,
+                    ),
+                    context=f"final progress update for {year}",
                 )
-                self._mark_progress_committed()
 
         # Mark completed if we finished normally
         if session_id and current_seq > end_seq:
-            self.db.complete_historical_session(session_id, conn=self._write_conn)
-            self._mark_progress_committed()
+            self._with_write_retry(
+                lambda: self.db.complete_historical_session(session_id, conn=self._write_conn),
+                context=f"complete historical session for {year}",
+            )
             logger.info(f"Completed year {year}")
 
         return ScrapeProgress(
@@ -804,7 +873,10 @@ class HistoricalScraper:
                     job = await self.fetch_job(year, seq)
 
                     if job:
-                        is_new, _ = self.db.upsert_job(job, conn=self._write_conn)
+                        is_new, _ = self._with_write_retry(
+                            lambda: self.db.upsert_job(job, conn=self._write_conn),
+                            context=f"upsert gap job {year}-{seq}",
+                        )
                         jobs_found += 1
                         self.batch_logger.log(year, seq, "found")
                         self.rate_limiter.on_success()
@@ -838,11 +910,18 @@ class HistoricalScraper:
                     self.rate_limiter.on_error()
                     jobs_not_found += 1
                     break
+                except Exception as e:
+                    if self._is_database_connection_error(e):
+                        logger.exception("Database write failed while retrying gap %s-%s after retry", year, seq)
+                        raise
+                    raise
 
             # Progress callback every 100 sequences
             if (i + 1) % 100 == 0:
-                self.batch_logger.flush()
-                self._mark_progress_committed()
+                self._with_write_retry(
+                    lambda: self.batch_logger.flush(),
+                    context=f"gap retry attempt flush for {year}-{seq}",
+                )
 
             if progress_callback and (i + 1) % 100 == 0:
                 progress = ScrapeProgress(
@@ -857,8 +936,10 @@ class HistoricalScraper:
                 await progress_callback(progress)
 
         # Final flush
-        self.batch_logger.flush()
-        self._mark_progress_committed()
+        self._with_write_retry(
+            lambda: self.batch_logger.flush(),
+            context=f"final gap retry attempt flush for {year}",
+        )
 
         logger.info(f"Gap retry complete for year {year}: {jobs_found:,} recovered, {jobs_not_found:,} still missing")
 
