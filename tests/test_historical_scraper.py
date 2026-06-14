@@ -5,6 +5,7 @@ import asyncio
 from src.mcf import historical_scraper as historical_scraper_module
 from src.mcf.api_client import MCFAPIError, MCFNotFoundError, MCFRateLimitError
 from src.mcf.historical_scraper import HistoricalScraper
+from src.mcf.pg_database import PostgresDatabase
 
 from .factories import generate_test_job
 
@@ -26,6 +27,33 @@ class FakeClient:
         if isinstance(outcome, Exception):
             raise outcome
         return outcome
+
+
+class FakeContextClient:
+    """Fake MCF client for context-manager setup tests."""
+
+    def __init__(self, requests_per_second: float):
+        self.requests_per_second = requests_per_second
+        self.entered = False
+        self.exited = False
+
+    async def __aenter__(self):
+        self.entered = True
+        return self
+
+    async def __aexit__(self, *_):
+        self.exited = True
+
+
+class FakePostgresDatabase(PostgresDatabase):
+    """Postgres-like database that records whether a writer was opened."""
+
+    def __init__(self):
+        self.connect_calls = 0
+
+    def _connect(self, write_optimized: bool = False):
+        self.connect_calls += 1
+        raise AssertionError("Postgres scrapers should not open a long-lived writer")
 
 
 def build_scraper(db_path, **kwargs) -> HistoricalScraper:
@@ -58,6 +86,25 @@ async def close_scraper(scraper: HistoricalScraper) -> None:
 
 class TestHistoricalScraper:
     """Tests for rate-limit recovery and bound management."""
+
+    def test_postgres_context_uses_per_operation_writes(self, monkeypatch):
+        db = FakePostgresDatabase()
+        monkeypatch.setattr(historical_scraper_module, "open_database", lambda _: db)
+        monkeypatch.setattr(historical_scraper_module, "MCFClient", FakeContextClient)
+
+        scraper = HistoricalScraper("postgresql://example/mcf")
+
+        async def run():
+            await scraper.__aenter__()
+            try:
+                assert scraper._write_conn is None
+                assert scraper.batch_logger.conn is None
+            finally:
+                await scraper.__aexit__(None, None, None)
+
+        asyncio.run(run())
+
+        assert db.connect_calls == 0
 
     def test_rate_limited_sequence_does_not_block_progress(self, empty_db):
         year = 2023
