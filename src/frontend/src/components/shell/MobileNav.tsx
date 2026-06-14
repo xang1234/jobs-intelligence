@@ -61,6 +61,7 @@ export default function MobileNav({ open, onClose, items, onPrefetch }: MobileNa
                     key={item.to}
                     to={item.to}
                     end={item.end}
+                    onPointerEnter={() => onPrefetch?.(item.to)}
                     onMouseEnter={() => onPrefetch?.(item.to)}
                     onFocus={() => onPrefetch?.(item.to)}
                     onClick={onClose}

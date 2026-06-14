@@ -40,7 +40,7 @@ const ROUTE_LOADERS: Record<string, () => Promise<unknown>> = {
 const TREND_PREFETCH = {
   skills: ['Customer Service', 'Microsoft Excel', 'Communication Skills'],
   role: 'customer service',
-  company: 'RECRUIT EXPERT PTE. LTD.',
+  company: 'DBS BANK LTD.',
   months: 3,
 } as const
 
@@ -180,11 +180,19 @@ export default function App() {
       cancelIdleCallback?: (handle: number) => void
     }
     if (typeof idleWindow.requestIdleCallback === 'function') {
-      const handle = idleWindow.requestIdleCallback(prefetchIdleWork, { timeout: 2500 })
-      return () => idleWindow.cancelIdleCallback?.(handle)
+      let idleHandle: number | undefined
+      const delayHandle = window.setTimeout(() => {
+        idleHandle = idleWindow.requestIdleCallback?.(prefetchIdleWork, { timeout: 2500 })
+      }, 1500)
+      return () => {
+        window.clearTimeout(delayHandle)
+        if (idleHandle !== undefined) {
+          idleWindow.cancelIdleCallback?.(idleHandle)
+        }
+      }
     }
 
-    const handle = window.setTimeout(prefetchIdleWork, 1200)
+    const handle = window.setTimeout(prefetchIdleWork, 1500)
     return () => window.clearTimeout(handle)
   }, [prefetchPageData, prefetchRouteModule])
 
@@ -219,6 +227,7 @@ export default function App() {
                     key={item.to}
                     to={item.to}
                     end={item.end}
+                    onPointerEnter={() => prefetchRoute(item.to)}
                     onMouseEnter={() => prefetchRoute(item.to)}
                     onFocus={() => prefetchRoute(item.to)}
                     className={({ isActive }) =>
@@ -238,6 +247,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={openPalette}
+                  onPointerEnter={() => void loadCommandPalette()}
                   onMouseEnter={() => void loadCommandPalette()}
                   onFocus={() => void loadCommandPalette()}
                   className="hidden items-center gap-2 rounded-full border border-[color:var(--border)] bg-[color:var(--surface-1)] px-3 py-1.5 text-xs font-medium text-[color:var(--ink-muted)] transition hover:border-[color:var(--border-strong)] hover:text-[color:var(--ink)] focus-visible:ring-2 focus-visible:ring-[color:var(--brand)] focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--bg)] sm:inline-flex"
@@ -255,6 +265,7 @@ export default function App() {
                   icon={<MagnifyingGlassIcon />}
                   size="sm"
                   onClick={openPalette}
+                  onPointerEnter={() => void loadCommandPalette()}
                   onMouseEnter={() => void loadCommandPalette()}
                   onFocus={() => void loadCommandPalette()}
                   className="sm:hidden"
@@ -268,6 +279,7 @@ export default function App() {
                     void loadMobileNav()
                     setMobileNavOpen(true)
                   }}
+                  onPointerEnter={() => void loadMobileNav()}
                   onMouseEnter={() => void loadMobileNav()}
                   onFocus={() => void loadMobileNav()}
                   className="lg:hidden"

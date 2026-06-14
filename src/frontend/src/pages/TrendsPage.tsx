@@ -124,7 +124,7 @@ const MONTHS_OPTIONS = TREND_WINDOW_OPTIONS as ReadonlyArray<SelectOption<number
 export default function TrendsPage() {
   const [skillInput, setSkillInput] = useState('Customer Service, Microsoft Excel, Communication Skills')
   const [roleInput, setRoleInput] = useState('customer service')
-  const [companyInput, setCompanyInput] = useState('RECRUIT EXPERT PTE. LTD.')
+  const [companyInput, setCompanyInput] = useState('DBS BANK LTD.')
   const [months, setMonths] = useState<number>(3)
   const [employmentType, setEmploymentType] = useState('')
   const [region, setRegion] = useState('')
