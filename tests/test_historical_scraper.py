@@ -1,9 +1,13 @@
 """Tests for the historical scraper recovery path."""
 
 import asyncio
+import sqlite3
+
+import pytest
 
 from src.mcf import historical_scraper as historical_scraper_module
 from src.mcf.api_client import MCFAPIError, MCFNotFoundError, MCFRateLimitError
+from src.mcf.batch_logger import BatchLogger
 from src.mcf.historical_scraper import HistoricalScraper
 from src.mcf.pg_database import PostgresDatabase
 
@@ -105,6 +109,66 @@ class TestHistoricalScraper:
         asyncio.run(run())
 
         assert db.connect_calls == 0
+
+    def test_batch_logger_keeps_buffer_when_flush_fails(self):
+        class FailingDB:
+            def batch_insert_attempts(self, attempts, conn=None):
+                raise sqlite3.OperationalError("connection is closed")
+
+        logger = BatchLogger(FailingDB())
+        logger.log(2026, 1, "found")
+
+        with pytest.raises(sqlite3.OperationalError):
+            logger.flush()
+
+        assert logger.pending_count == 1
+        logger._buffer.clear()
+
+    def test_scrape_year_reopens_closed_write_connection(self, empty_db, monkeypatch):
+        year = 2026
+        scraper = build_scraper(empty_db.db_path, batch_size=10)
+
+        seq1_uuid = scraper._job_uuid(year, 1)
+        seq2_uuid = scraper._job_uuid(year, 2)
+        job1 = generate_test_job(job_uuid=seq1_uuid)
+        client = FakeClient(
+            {
+                seq1_uuid: [job1],
+                seq2_uuid: [MCFNotFoundError("missing")],
+            }
+        )
+
+        original_upsert_job = scraper.db.upsert_job
+        attempts = 0
+
+        def flaky_upsert_job(job, conn=None):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                conn.close()
+                raise sqlite3.OperationalError("Cannot operate on a closed database.")
+            return original_upsert_job(job, conn=conn)
+
+        monkeypatch.setattr(scraper.db, "upsert_job", flaky_upsert_job)
+
+        async def run():
+            await attach_fake_client(scraper, client)
+            try:
+                return await scraper.scrape_year(year, start_seq=1, end_seq=2, resume=False)
+            finally:
+                await close_scraper(scraper)
+
+        progress = asyncio.run(run())
+        stats = empty_db.get_attempt_stats(year)
+
+        assert attempts == 2
+        assert progress.current_seq == 3
+        assert progress.jobs_found == 1
+        assert progress.jobs_not_found == 1
+        assert stats["found"] == 1
+        assert stats["not_found"] == 1
+        assert empty_db.get_job(seq1_uuid) is not None
+        assert client.calls == [seq1_uuid, seq2_uuid]
 
     def test_rate_limited_sequence_does_not_block_progress(self, empty_db):
         year = 2023
