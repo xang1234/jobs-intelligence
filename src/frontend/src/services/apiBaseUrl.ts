@@ -8,5 +8,6 @@ export function resolveApiBaseUrl(env?: ApiBaseUrlEnv): string {
   if (!configured) {
     return '/'
   }
-  return configured.length > 1 ? configured.replace(/\/+$/, '') : configured
+  const normalized = configured.length > 1 ? configured.replace(/\/+$/, '') : configured
+  return normalized || '/'
 }

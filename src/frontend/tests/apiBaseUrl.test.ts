@@ -21,3 +21,15 @@ test('normalizes configured API base URL whitespace and trailing slash', () => {
     'https://xang1234-jobs-intelligence-api.hf.space',
   )
 })
+
+test('preserves a single slash for same-origin API routes', () => {
+  assert.equal(resolveApiBaseUrl({ VITE_API_BASE_URL: '/' }), '/')
+})
+
+test('falls back to same-origin routes when configured API base URL is only slashes', () => {
+  assert.equal(resolveApiBaseUrl({ VITE_API_BASE_URL: '//' }), '/')
+})
+
+test('normalizes multiple trailing slashes from absolute API base URL', () => {
+  assert.equal(resolveApiBaseUrl({ VITE_API_BASE_URL: 'https://example.com///' }), 'https://example.com')
+})

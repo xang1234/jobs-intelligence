@@ -183,10 +183,10 @@ Required Space variables:
 MCF_SEARCH_BACKEND=pgvector
 MCF_LEAN_HOSTED=1
 MCF_EMBEDDING_BACKEND=onnx
-MCF_CORS_ORIGINS=https://jobs-intelligence.pages.dev,http://localhost:3000
+MCF_CORS_ORIGINS=https://jobs-intelligence.pages.dev,https://jobs.deepgradient.uk,https://deepgradient.uk,http://localhost:3000
 MCF_RATE_LIMIT_RPM=100
 SOURCE_REPO=https://github.com/xang1234/jobs-intelligence.git
-SOURCE_REF=claude/enhance-ui-ux-design-CNnPV
+SOURCE_REF=master
 ```
 
 Deploy with:
@@ -197,7 +197,7 @@ export NEON_DATABASE_URL='postgresql://<neon-dsn>'
 
 poetry run python scripts/deploy_huggingface_space.py \
   --repo-id xang1234/jobs-intelligence-api \
-  --cors-origins 'https://jobs-intelligence.pages.dev,http://localhost:3000'
+  --cors-origins 'https://jobs-intelligence.pages.dev,https://jobs.deepgradient.uk,https://deepgradient.uk,http://localhost:3000'
 ```
 
 The script:
@@ -386,7 +386,7 @@ Cloudflare Pages settings for a Git-connected deployment:
 Root directory: src/frontend
 Build command: npm run build
 Build output directory: dist
-Production branch: claude/enhance-ui-ux-design-CNnPV
+Production branch: master
 Environment variable:
   VITE_API_BASE_URL=https://xang1234-jobs-intelligence-api.hf.space
 ```

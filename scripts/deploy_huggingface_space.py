@@ -19,9 +19,11 @@ from huggingface_hub import HfApi
 
 
 DEFAULT_REPO_ID = "xang1234/jobs-intelligence-api"
-DEFAULT_SOURCE_REF = "claude/enhance-ui-ux-design-CNnPV"
+DEFAULT_SOURCE_REF = "master"
 DEFAULT_SOURCE_REPO = "https://github.com/xang1234/jobs-intelligence.git"
-DEFAULT_CORS_ORIGINS = "https://jobs.deepgradient.uk,https://deepgradient.uk,http://localhost:3000"
+DEFAULT_CORS_ORIGINS = (
+    "https://jobs-intelligence.pages.dev,https://jobs.deepgradient.uk,https://deepgradient.uk,http://localhost:3000"
+)
 
 
 def load_env_file(path: Path) -> None:

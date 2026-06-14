@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 ARG SOURCE_REPO=https://github.com/xang1234/jobs-intelligence.git
-ARG SOURCE_REF=claude/enhance-ui-ux-design-CNnPV
+ARG SOURCE_REF=master
 
 FROM python:3.11-slim AS builder
 

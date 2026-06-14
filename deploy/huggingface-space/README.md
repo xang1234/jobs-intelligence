@@ -27,8 +27,8 @@ Required variables:
 MCF_SEARCH_BACKEND=pgvector
 MCF_LEAN_HOSTED=1
 MCF_EMBEDDING_BACKEND=onnx
-MCF_CORS_ORIGINS=https://jobs.deepgradient.uk,https://deepgradient.uk
+MCF_CORS_ORIGINS=https://jobs-intelligence.pages.dev,https://jobs.deepgradient.uk,https://deepgradient.uk,http://localhost:3000
 MCF_RATE_LIMIT_RPM=100
 SOURCE_REPO=https://github.com/xang1234/jobs-intelligence.git
-SOURCE_REF=claude/enhance-ui-ux-design-CNnPV
+SOURCE_REF=master
 ```
