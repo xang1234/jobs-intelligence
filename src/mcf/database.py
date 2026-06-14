@@ -2341,9 +2341,7 @@ class MCFDatabase:
     def _latest_posted_date(self) -> Optional[date]:
         """Return the freshest posted date available in the jobs table."""
         with self._connection() as conn:
-            row = conn.execute(
-                "SELECT MAX(posted_date) AS latest FROM jobs WHERE posted_date IS NOT NULL"
-            ).fetchone()
+            row = conn.execute("SELECT MAX(posted_date) AS latest FROM jobs WHERE posted_date IS NOT NULL").fetchone()
         if not row:
             return None
         return coerce_posted_date(row["latest"])
