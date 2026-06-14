@@ -1,62 +1,79 @@
-# Neon + Oracle Hosted Deployment
+# Neon + Oracle/Hugging Face Hosted Deployment
 
-This guide deploys the hosted stack as three separate services:
+This guide deploys the hosted Jobs Intelligence stack as small, separate
+services:
 
-- `Neon Free` hosts the lean Postgres database
-- `GitHub Actions` runs scheduled hosted scraping, embedding sync, and purge jobs
-- `Oracle Cloud Always Free` hosts the FastAPI container on an Ampere A1 VM
+- `Neon` hosts the lean Postgres serving database with `pgvector`
+- `GitHub Actions` refreshes the hosted Neon slice on a schedule
+- `Hugging Face Spaces` or `Oracle Cloud Always Free` hosts the FastAPI API
+- `Cloudflare Pages` hosts the static React frontend
 
-Local Postgres remains the full archive and the primary source of truth. The
-hosted database is a lean serving slice that keeps only rows where:
+Local Postgres remains the full archive and the source of truth. The hosted
+database is intentionally bounded to roughly the most recent 90 days of current
+year jobs:
 
 ```text
 posted_date >= max(Jan 1 of current year, today - 90 days)
 ```
 
 The hosted slice keeps only `job` embeddings. `skill` and `company` embeddings
-stay local-only.
+remain local-only.
+
+## Current Hosted Shape
+
+The simplest working deployment is:
+
+- API: `https://xang1234-jobs-intelligence-api.hf.space`
+- frontend: `https://jobs-intelligence.pages.dev`
+- custom domain: optional
+
+`jobs.deepgradient.uk` is not required. Keeping the `.pages.dev` URL is fine as
+long as the API CORS allow-list includes `https://jobs-intelligence.pages.dev`.
 
 ## 1. Prerequisites
 
-You should already have:
+You should have:
 
-- a full local Postgres archive populated from SQLite
-- working local CLI access via `poetry run python -m src.cli`
-- a GitHub repository with Actions enabled
-- an Oracle Cloud Free Tier account
-- a Neon account
+- a local Postgres archive
+- Poetry dependencies installed locally
+- a Neon project
+- a GitHub repo with Actions enabled
+- either a Hugging Face account or an Oracle Cloud account
+- optionally, a Cloudflare account for the frontend
 
-This guide assumes the repo is public, so standard GitHub-hosted scheduled
-Actions are free. If the repo becomes private, review current GitHub Actions
-billing before keeping the refresh workflow on hosted runners.
+Useful local values:
 
-## Provider caveats
+```bash
+export LOCAL_DATABASE_URL='postgresql://postgres@127.0.0.1:55432/mcf'
+export NEON_DATABASE_URL='postgresql://<neon-dsn>'
+```
 
-- Neon Free storage limits can change. Check the current pricing page before
-  relying on the same headroom, and monitor database size after each hosted
-  refresh.
-- GitHub Actions scheduled runs are treated as free here because the repository
-  is public. Private repositories have different included-runner limits.
-- Oracle Always Free capacity is not guaranteed in every region, and idle free
-  accounts can be suspended. Keep the VM active and be ready to recreate it in
-  another region if Oracle does not offer A1 capacity in your first choice.
+If you use the helper deploy scripts, keep secrets in `/tmp/mcf-deploy.env`:
 
-## 2. Create the Neon database
+```bash
+export NEON_DATABASE_URL='postgresql://<neon-dsn>'
+export HF_TOKEN='hf_...'
+export CLOUDFLARE_API_TOKEN='...'
+export CLOUDFLARE_ACCOUNT_ID='...'
+```
 
-1. Create a new Neon project.
-2. Copy the direct Postgres connection string for the project.
-3. In the Neon SQL editor, enable `pgvector`:
+Do not commit this file.
+
+## 2. Create Neon
+
+Create a Neon project and copy the direct Postgres connection string. In the
+Neon SQL editor, enable `pgvector`:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
 SELECT extname FROM pg_extension WHERE extname = 'vector';
 ```
 
-4. Keep that DSN for the remaining steps as `NEON_DATABASE_URL`.
+Store the connection string as `NEON_DATABASE_URL`.
 
-## 3. Seed the hosted slice from local Postgres
+## 3. Seed Neon From Local Postgres
 
-Run the initial hosted seed from your local machine.
+Run the initial seed from your local machine:
 
 ```bash
 export LOCAL_DATABASE_URL='postgresql://postgres@127.0.0.1:55432/mcf'
@@ -68,14 +85,16 @@ poetry run python -m src.cli pg-seed-hosted \
   --max-age-days 90
 ```
 
-The `--min-posted-date` defaults to January 1 of the current year. Override it
-only if you need a different floor.
+Equivalent script form:
 
-The hosted seed keeps the retained `jobs`, `job` embeddings, and one resumable
-historical scrape session for the current year when one exists locally. It does
-not copy `skill` or `company` embeddings.
+```bash
+PYTHONPATH=. poetry run python scripts/seed_hosted_slice.py \
+  --source "$LOCAL_DATABASE_URL" \
+  --target "$NEON_DATABASE_URL" \
+  --max-age-days 90
+```
 
-Verify the hosted contents with SQL:
+Verify Neon:
 
 ```sql
 SELECT COUNT(*) AS jobs FROM jobs;
@@ -93,63 +112,147 @@ SELECT pg_size_pretty(pg_database_size(current_database())) AS database_size;
 
 Expected shape:
 
-- only recent jobs from the current year are present
-- only `job` rows exist in `embeddings`
-- the database size stays comfortably below Neon Free storage limits
+- only recent current-year jobs are present
+- `embeddings` contains only `entity_type = 'job'`
+- job embedding coverage is close to 100%
+- database size stays below the selected Neon tier limit
 
-## 4. Add the hosted refresh GitHub Actions secret
+## 4. Configure Hosted Refresh
 
-In GitHub repository settings, add:
+Add this GitHub Actions secret:
 
-- `NEON_DATABASE_URL`
+```text
+NEON_DATABASE_URL
+```
 
-The included workflow file is:
+The workflow is:
 
 - [neon-hosted-refresh.yml](../.github/workflows/neon-hosted-refresh.yml)
 
-It runs the hosted refresh sequence on a schedule and also supports manual
-dispatch.
-
-## 5. What the hosted refresh workflow does
-
-Each scheduled run performs:
+Each scheduled run:
 
 ```bash
 YEAR=$(date +%Y)
-poetry run python -m src.cli scrape-historical --year "$YEAR" --resume --db "$NEON_DATABASE_URL"
-poetry run python -m src.cli embed-sync --db "$NEON_DATABASE_URL" --embedding-backend onnx --onnx-model-dir data/models/all-MiniLM-L6-v2-onnx --no-update-index
-poetry run python -m src.cli pg-purge-hosted --target "$NEON_DATABASE_URL" --max-age-days 90
+
+poetry run python -m src.cli scrape-historical \
+  --year "$YEAR" \
+  --resume \
+  --db "$NEON_DATABASE_URL"
+
+poetry run python -m src.cli embed-sync \
+  --db "$NEON_DATABASE_URL" \
+  --embedding-backend onnx \
+  --onnx-model-dir data/models/all-MiniLM-L6-v2-onnx \
+  --no-update-index
+
+poetry run python -m src.cli pg-purge-hosted \
+  --target "$NEON_DATABASE_URL" \
+  --max-age-days 90
 ```
 
-This is intentionally a scheduled batch job, not a daemon:
+This is a scheduled batch refresh, not a daemon:
 
 - Neon does not run background processes
-- the hosted slice stays bounded because old rows are purged each run
-- `scrape-historical --resume` can continue from the hosted session state
-- the scrape year and purge cutoff are computed dynamically — no manual update
-  needed on year rollover
+- the hosted slice stays bounded by the purge step
+- hosted scrape state can resume between workflow runs
+- the current year and retention cutoff are computed dynamically
 
-## 6. Create the Oracle API VM
+## 5. API Hosting Option A: Hugging Face Spaces
 
-Create an Oracle Cloud Always Free VM with these settings:
+Use Hugging Face Spaces when Oracle Free Tier capacity is unavailable, when you
+want the lowest-friction free API host, or when you do not want to manage a VM.
+
+This repo includes a Docker Space payload:
+
+- [deploy/huggingface-space/Dockerfile](../deploy/huggingface-space/Dockerfile)
+- [deploy/huggingface-space/README.md](../deploy/huggingface-space/README.md)
+- [scripts/deploy_huggingface_space.py](../scripts/deploy_huggingface_space.py)
+
+The Space builds a Docker image, clones this repo at `SOURCE_REF`, exports the
+ONNX model bundle during build, and runs FastAPI on `${PORT:-8000}`.
+
+Required Hugging Face Space secret:
+
+```text
+DATABASE_URL=<Neon DSN>
+```
+
+Required Space variables:
+
+```text
+MCF_SEARCH_BACKEND=pgvector
+MCF_LEAN_HOSTED=1
+MCF_EMBEDDING_BACKEND=onnx
+MCF_CORS_ORIGINS=https://jobs-intelligence.pages.dev,https://jobs.deepgradient.uk,https://deepgradient.uk,http://localhost:3000
+MCF_RATE_LIMIT_RPM=100
+SOURCE_REPO=https://github.com/xang1234/jobs-intelligence.git
+SOURCE_REF=master
+```
+
+Deploy with:
+
+```bash
+export HF_TOKEN='hf_...'
+export NEON_DATABASE_URL='postgresql://<neon-dsn>'
+
+poetry run python scripts/deploy_huggingface_space.py \
+  --repo-id xang1234/jobs-intelligence-api \
+  --cors-origins 'https://jobs-intelligence.pages.dev,https://jobs.deepgradient.uk,https://deepgradient.uk,http://localhost:3000'
+```
+
+The script:
+
+1. Creates or reuses the Docker Space.
+2. Stores `DATABASE_URL` as a Space secret.
+3. Sets the runtime variables.
+4. Uploads `deploy/huggingface-space/`.
+5. Restarts the Space.
+
+Smoke-test the Space:
+
+```bash
+curl https://xang1234-jobs-intelligence-api.hf.space/health
+curl https://xang1234-jobs-intelligence-api.hf.space/docs
+curl -X POST https://xang1234-jobs-intelligence-api.hf.space/api/search \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"data analyst","limit":5}'
+```
+
+Expected:
+
+- `/health` returns `healthy` or `degraded`, not a server error
+- `/docs` loads FastAPI OpenAPI docs
+- `/api/search` returns jobs from the Neon slice
+
+Notes:
+
+- First requests can be slow while the Space warms up.
+- Keep `MCF_SEARCH_BACKEND=pgvector`; do not upload FAISS indexes.
+- No mounted bucket is required for this API-only Space.
+- Use Hugging Face secrets for the Neon DSN. Do not commit it.
+
+## 6. API Hosting Option B: Oracle Always Free
+
+Use Oracle when you want a dedicated VM, a stable custom API domain, and more
+control over CPU, memory, logs, and reverse proxying.
+
+Create an Oracle Cloud Always Free VM:
 
 - shape: `VM.Standard.A1.Flex`
 - OS: Ubuntu 22.04 or 24.04
 - recommended size: `2 OCPU / 12 GB RAM`
 - public IP enabled
 
-Do not use `VM.Standard.E2.1.Micro` for the API. The micro shape is too small
-for this backend and ONNX runtime.
+Avoid `VM.Standard.E2.1.Micro`; it is too small for this backend and ONNX
+runtime.
 
 Allow inbound traffic on:
 
 - `22` for SSH
-- `80` and `443` for HTTPS (Caddy reverse proxy)
-- optionally `8000` for direct API testing (can be closed after Caddy is set up)
+- `80` and `443` for HTTPS
+- optionally `8000` for direct API testing
 
-## 7. Install Docker on Oracle
-
-SSH into the Oracle VM and install Docker:
+Install Docker:
 
 ```bash
 sudo apt-get update
@@ -168,9 +271,7 @@ newgrp docker
 docker --version
 ```
 
-## 8. Build and run the API container on Oracle
-
-Clone the repo on the Oracle VM and build the backend image:
+Clone, build, and run:
 
 ```bash
 git clone https://github.com/xang1234/jobs-intelligence.git
@@ -178,8 +279,7 @@ cd jobs-intelligence
 docker build -f docker/backend.Dockerfile -t mcf-backend .
 ```
 
-Create an env file for secrets (keeps credentials out of `docker inspect` and
-process listings):
+Create `/opt/mcf/.env`:
 
 ```bash
 sudo mkdir -p /opt/mcf
@@ -188,12 +288,13 @@ DATABASE_URL=postgresql://<neon-dsn>
 MCF_SEARCH_BACKEND=pgvector
 MCF_LEAN_HOSTED=1
 MCF_EMBEDDING_BACKEND=onnx
-MCF_CORS_ORIGINS=https://<your-frontend-origin>
+MCF_CORS_ORIGINS=https://jobs-intelligence.pages.dev
+MCF_RATE_LIMIT_RPM=100
 EOF
 sudo chmod 600 /opt/mcf/.env
 ```
 
-Run the API against Neon:
+Run the API:
 
 ```bash
 docker run -d \
@@ -208,19 +309,7 @@ docker run -d \
   uvicorn src.api.app:app --host 0.0.0.0 --port 8000 --workers 1
 ```
 
-Notes:
-
-- `MCF_ONNX_MODEL_DIR` is not required when you use the bundled backend image
-- keep `--workers 1` unless you have measured memory and CPU headroom
-- do not mount FAISS indexes on Oracle; hosted search should use `pgvector`
-- `--memory 3g` matches the resource limits in `docker-compose.prod.yml`
-- `--log-opt` prevents unbounded log growth on the small VM
-- the Dockerfile does not set a default `MCF_CORS_ORIGINS` — you must set it in
-  the env file or the API will reject cross-origin requests
-
-## 9. Set up HTTPS with Caddy
-
-Install Caddy on the Oracle VM for automatic TLS via Let's Encrypt:
+Install Caddy for HTTPS:
 
 ```bash
 sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https
@@ -232,33 +321,24 @@ sudo apt-get update
 sudo apt-get install -y caddy
 ```
 
-Create a Caddyfile:
+Create `/etc/caddy/Caddyfile`:
 
-```bash
-sudo tee /etc/caddy/Caddyfile > /dev/null <<'EOF'
+```text
 api.yourdomain.com {
     reverse_proxy 127.0.0.1:8000
 }
-EOF
+```
+
+Point DNS for `api.yourdomain.com` at the Oracle public IP before relying on
+Caddy certificate issuance, then reload Caddy:
+
+```bash
 sudo systemctl reload caddy
 ```
 
-Caddy automatically provisions and renews Let's Encrypt certificates. Point
-your DNS A record to the Oracle VM's public IP before starting Caddy.
+After HTTPS works, close direct inbound port `8000`.
 
-Once Caddy is active, close port `8000` in the Oracle security list — all
-traffic should go through ports 80/443.
-
-Update `MCF_CORS_ORIGINS` in `/opt/mcf/.env` to use your HTTPS domain, then
-restart the API container:
-
-```bash
-docker restart mcf-api
-```
-
-## 10. Smoke-test the hosted API
-
-From the Oracle VM or your workstation:
+Smoke-test:
 
 ```bash
 curl https://api.yourdomain.com/health
@@ -268,43 +348,117 @@ curl -X POST https://api.yourdomain.com/api/search \
   -d '{"query":"data analyst","limit":5}'
 ```
 
-Expected results:
+## 7. Frontend on Cloudflare Pages
 
-- `/health` returns `healthy` or `degraded`, but not a server error
-- `/docs` loads the FastAPI OpenAPI UI
-- `/api/search` returns recent retained jobs from the hosted slice
+The frontend is a static Vite/React SPA under `src/frontend`.
 
-## 11. Frontend deployment
+Current working setup:
 
-The frontend is a static React SPA that can be deployed independently of the
-API backend. Options:
+- project: `jobs-intelligence`
+- production URL: `https://jobs-intelligence.pages.dev`
+- API URL: `https://xang1234-jobs-intelligence-api.hf.space`
+- custom domain: optional
 
-- **Static hosting** (Vercel, Netlify, Cloudflare Pages): push the
-  `src/frontend/` directory and set the build command to `npm run build`. Set
-  the API base URL via environment variable to point at the Oracle API.
-- **Oracle VM co-hosting**: build and run the frontend Docker image on the same
-  VM using `docker/frontend.Dockerfile`. Add a second Caddy site block to serve
-  the frontend on a separate subdomain.
+Build locally:
 
-Either way, the frontend makes API calls to `/api/*` which must resolve to the
-backend. On static hosts, configure a rewrite/proxy rule. On Oracle co-hosting,
-update `docker/nginx.conf` to proxy to the backend container name or IP.
+```bash
+cd src/frontend
+VITE_API_BASE_URL=https://xang1234-jobs-intelligence-api.hf.space npm run build
+```
 
-## 12. Ongoing operations
+The repo includes a Pages SPA fallback:
 
-- Continue scraping the full archive locally. Local Postgres remains the system
-  of record.
+```text
+src/frontend/public/_redirects
+```
+
+with:
+
+```text
+/* /index.html 200
+```
+
+This keeps deep links such as `/trends` working on Cloudflare Pages.
+
+Cloudflare Pages settings for a Git-connected deployment:
+
+```text
+Root directory: src/frontend
+Build command: npm run build
+Build output directory: dist
+Production branch: master
+Environment variable:
+  VITE_API_BASE_URL=https://xang1234-jobs-intelligence-api.hf.space
+```
+
+Direct upload is also valid. Build locally with `VITE_API_BASE_URL` set, then
+upload `src/frontend/dist`.
+
+If you want a custom domain later, create a Pages custom domain and DNS record:
+
+```text
+Type: CNAME
+Name: jobs
+Target: jobs-intelligence.pages.dev
+Proxy: On
+```
+
+If the `.pages.dev` URL is acceptable, skip the custom domain entirely.
+
+## 8. CORS Checklist
+
+The API must allow the frontend origin. For the current Cloudflare Pages URL:
+
+```text
+MCF_CORS_ORIGINS=https://jobs-intelligence.pages.dev,http://localhost:3000
+```
+
+If you add a custom domain later, include both:
+
+```text
+MCF_CORS_ORIGINS=https://jobs-intelligence.pages.dev,https://jobs.deepgradient.uk,http://localhost:3000
+```
+
+Check CORS with:
+
+```bash
+curl -i -X OPTIONS https://xang1234-jobs-intelligence-api.hf.space/api/search \
+  -H 'Origin: https://jobs-intelligence.pages.dev' \
+  -H 'Access-Control-Request-Method: POST' \
+  -H 'Access-Control-Request-Headers: content-type'
+```
+
+Expected:
+
+```text
+access-control-allow-origin: https://jobs-intelligence.pages.dev
+```
+
+## 9. Ongoing Operations
+
+- Continue scraping the full archive locally.
 - Let GitHub Actions refresh Neon on schedule.
-- Watch Neon storage usage in the dashboard. If the hosted slice grows too
-  close to the Free storage cap, reduce retention before the database fills up.
-- Keep Oracle focused on the API only. Do not run the scraper daemon there.
+- Monitor Neon storage and reduce retention if needed.
+- Keep hosted API search on `pgvector`.
+- Regenerate hosted embeddings after each scrape refresh.
+- If the local archive catches up beyond the hosted slice, reseed or let the
+  scheduled workflow ingest into Neon.
 
-## 13. Rollback
+Manual Neon refresh from local Postgres:
 
-If the hosted deployment misbehaves:
+```bash
+export LOCAL_DATABASE_URL='postgresql://postgres@127.0.0.1:55432/mcf'
+export NEON_DATABASE_URL='postgresql://<neon-dsn>'
 
-1. Stop the Oracle API container.
-2. Truncate and reseed Neon from local Postgres:
+poetry run python -m src.cli pg-seed-hosted \
+  --source "$LOCAL_DATABASE_URL" \
+  --target "$NEON_DATABASE_URL" \
+  --max-age-days 90
+```
+
+## 10. Rollback
+
+If the hosted database is wrong:
 
 ```bash
 poetry run python -m src.cli pg-seed-hosted \
@@ -313,7 +467,22 @@ poetry run python -m src.cli pg-seed-hosted \
   --max-age-days 90
 ```
 
-3. Start the Oracle API container again.
+If the Hugging Face API misbehaves:
 
-If Oracle becomes unreliable, keep Neon and move the API container to another
-compute host without changing the hosted database workflow.
+1. Check `https://huggingface.co/spaces/xang1234/jobs-intelligence-api`.
+2. Restart the Space.
+3. Re-run `scripts/deploy_huggingface_space.py`.
+4. Temporarily point `VITE_API_BASE_URL` at an Oracle or local API if needed.
+
+If Oracle becomes unreliable:
+
+1. Keep Neon unchanged.
+2. Deploy the Hugging Face Space.
+3. Update Cloudflare Pages `VITE_API_BASE_URL`.
+4. Redeploy the frontend.
+
+If the frontend misbehaves:
+
+1. Roll back to the previous Cloudflare Pages deployment.
+2. Verify `VITE_API_BASE_URL`.
+3. Confirm the API CORS allow-list includes the active frontend origin.

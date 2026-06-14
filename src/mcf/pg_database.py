@@ -360,7 +360,7 @@ class PostgresDatabase:
             raw = raw[1:-1]
         if not raw:
             return np.array([], dtype=np.float32)
-        return np.fromiter((float(part) for part in raw.split(",")), dtype=np.float32)
+        return np.fromiter((float(part) for part in raw.replace(",", " ").split()), dtype=np.float32)
 
     @staticmethod
     def _fetch_id(row: dict[str, Any] | tuple[Any, ...] | None) -> int:

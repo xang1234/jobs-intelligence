@@ -182,6 +182,13 @@ def test_postgres_database_decodes_bytea_embeddings():
     assert decoded.dtype == np.float32
 
 
+def test_postgres_database_decodes_numpy_string_embeddings():
+    decoded = PostgresDatabase._vector_from_value("[ 1.25000000e-01 -2.50000000e-01\n  3.75000000e-01]")
+
+    assert np.allclose(decoded, np.array([0.125, -0.25, 0.375], dtype=np.float32))
+    assert decoded.dtype == np.float32
+
+
 def test_build_pg_schema_sql_falls_back_to_bytea_without_pgvector():
     schema = build_pg_schema_sql(pgvector_enabled=False)
 
