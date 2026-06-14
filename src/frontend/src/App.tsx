@@ -1,8 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom'
 import { Bars3Icon, MagnifyingGlassIcon } from '@heroicons/react/24/outline'
-import CommandPalette from '@/components/shell/CommandPalette'
-import MobileNav from '@/components/shell/MobileNav'
 import ThemeToggle from '@/components/shell/ThemeToggle'
 import TopProgressBar from '@/components/shell/TopProgressBar'
 import { IconButton, Kbd, Spinner } from '@/components/ui'
@@ -10,10 +9,19 @@ import { useHotkeys } from '@/hooks/useHotkeys'
 
 type NavItem = { to: string; label: string; end?: boolean }
 
-const OverviewPage = lazy(() => import('@/pages/OverviewPage'))
-const TrendsPage = lazy(() => import('@/pages/TrendsPage'))
-const MatchLabPage = lazy(() => import('@/pages/MatchLabPage'))
-const SearchPage = lazy(() => import('@/pages/SearchPage'))
+const loadOverviewPage = () => import('@/pages/OverviewPage')
+const loadTrendsPage = () => import('@/pages/TrendsPage')
+const loadMatchLabPage = () => import('@/pages/MatchLabPage')
+const loadSearchPage = () => import('@/pages/SearchPage')
+const loadCommandPalette = () => import('@/components/shell/CommandPalette')
+const loadMobileNav = () => import('@/components/shell/MobileNav')
+
+const OverviewPage = lazy(loadOverviewPage)
+const TrendsPage = lazy(loadTrendsPage)
+const MatchLabPage = lazy(loadMatchLabPage)
+const SearchPage = lazy(loadSearchPage)
+const CommandPalette = lazy(loadCommandPalette)
+const MobileNav = lazy(loadMobileNav)
 
 const NAV_ITEMS: ReadonlyArray<NavItem> = [
   { to: '/', label: 'Overview', end: true },
@@ -21,6 +29,20 @@ const NAV_ITEMS: ReadonlyArray<NavItem> = [
   { to: '/match-lab', label: 'Match Lab' },
   { to: '/search', label: 'Search & Similarity' },
 ]
+
+const ROUTE_LOADERS: Record<string, () => Promise<unknown>> = {
+  '/': loadOverviewPage,
+  '/trends': loadTrendsPage,
+  '/match-lab': loadMatchLabPage,
+  '/search': loadSearchPage,
+}
+
+const TREND_PREFETCH = {
+  skills: ['Customer Service', 'Microsoft Excel', 'Communication Skills'],
+  role: 'customer service',
+  company: 'RECRUIT EXPERT PTE. LTD.',
+  months: 3,
+} as const
 
 function RouteLoading() {
   return (
@@ -34,13 +56,109 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const location = useLocation()
+  const queryClient = useQueryClient()
 
   const activeItem =
     NAV_ITEMS.find((item) =>
       item.end ? location.pathname === item.to : location.pathname.startsWith(item.to),
     ) ?? NAV_ITEMS[0]
 
-  const openPalette = useCallback(() => setPaletteOpen(true), [])
+  const prefetchRouteModule = useCallback((to: string) => {
+    void ROUTE_LOADERS[to]?.()
+  }, [])
+
+  const prefetchPageData = useCallback(
+    (to: string) => {
+      void import('@/services/api').then(
+        ({
+          findSimilarCompanies,
+          getCompanyTrend,
+          getHealth,
+          getOverview,
+          getPerformanceStats,
+          getPopularQueries,
+          getRoleTrend,
+          getSkillCloud,
+          getSkillTrends,
+          getStats,
+        }) => {
+          if (to === '/') {
+            void queryClient.prefetchQuery({
+              queryKey: ['overview', 3],
+              queryFn: () => getOverview(3),
+            })
+            void queryClient.prefetchQuery({ queryKey: ['stats'], queryFn: getStats })
+            void queryClient.prefetchQuery({
+              queryKey: ['popularQueries'],
+              queryFn: () => getPopularQueries(30, 8),
+            })
+            void queryClient.prefetchQuery({
+              queryKey: ['performanceStats'],
+              queryFn: () => getPerformanceStats(30),
+            })
+          }
+
+          if (to === '/trends') {
+            void queryClient.prefetchQuery({
+              queryKey: ['overview', TREND_PREFETCH.months],
+              queryFn: () => getOverview(TREND_PREFETCH.months),
+            })
+            void queryClient.prefetchQuery({
+              queryKey: ['skillTrends', TREND_PREFETCH.skills, TREND_PREFETCH.months, '', ''],
+              queryFn: () =>
+                getSkillTrends({
+                  skills: [...TREND_PREFETCH.skills],
+                  months: TREND_PREFETCH.months,
+                  employment_type: null,
+                  region: null,
+                }),
+            })
+            void queryClient.prefetchQuery({
+              queryKey: ['roleTrend', TREND_PREFETCH.role, TREND_PREFETCH.months, '', ''],
+              queryFn: () =>
+                getRoleTrend({
+                  query: TREND_PREFETCH.role,
+                  months: TREND_PREFETCH.months,
+                  employment_type: null,
+                  region: null,
+                }),
+            })
+            void queryClient.prefetchQuery({
+              queryKey: ['companyTrend', TREND_PREFETCH.company, TREND_PREFETCH.months],
+              queryFn: () => getCompanyTrend(TREND_PREFETCH.company, TREND_PREFETCH.months, false),
+            })
+            void queryClient.prefetchQuery({
+              queryKey: ['similarCompanies', TREND_PREFETCH.company],
+              queryFn: () => findSimilarCompanies({ company_name: TREND_PREFETCH.company, limit: 6 }),
+            })
+          }
+
+          if (to === '/search') {
+            void queryClient.prefetchQuery({
+              queryKey: ['skillCloud'],
+              queryFn: () => getSkillCloud(10, 80),
+              staleTime: 10 * 60 * 1000,
+            })
+            void queryClient.prefetchQuery({ queryKey: ['health'], queryFn: getHealth })
+          }
+        },
+      )
+    },
+    [queryClient],
+  )
+
+  const prefetchRoute = useCallback(
+    (to: string) => {
+      prefetchRouteModule(to)
+      prefetchPageData(to)
+    },
+    [prefetchPageData, prefetchRouteModule],
+  )
+
+  const openPalette = useCallback(() => {
+    void loadCommandPalette()
+    setPaletteOpen(true)
+  }, [])
   const closePalette = useCallback(() => setPaletteOpen(false), [])
 
   useEffect(() => {
@@ -52,6 +170,28 @@ export default function App() {
     mql.addEventListener('change', close)
     return () => mql.removeEventListener('change', close)
   }, [])
+
+  useEffect(() => {
+    const prefetchIdleWork = () => {
+      for (const item of NAV_ITEMS) {
+        prefetchRouteModule(item.to)
+      }
+      prefetchPageData('/')
+      prefetchPageData('/search')
+    }
+
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
+      cancelIdleCallback?: (handle: number) => void
+    }
+    if (typeof idleWindow.requestIdleCallback === 'function') {
+      const handle = idleWindow.requestIdleCallback(prefetchIdleWork, { timeout: 2500 })
+      return () => idleWindow.cancelIdleCallback?.(handle)
+    }
+
+    const handle = window.setTimeout(prefetchIdleWork, 1200)
+    return () => window.clearTimeout(handle)
+  }, [prefetchPageData, prefetchRouteModule])
 
   useHotkeys({
     'mod+k': (e) => {
@@ -84,6 +224,8 @@ export default function App() {
                     key={item.to}
                     to={item.to}
                     end={item.end}
+                    onMouseEnter={() => prefetchRoute(item.to)}
+                    onFocus={() => prefetchRoute(item.to)}
                     className={({ isActive }) =>
                       `rounded-full px-4 py-2 text-sm font-semibold transition ${
                         isActive
@@ -101,6 +243,8 @@ export default function App() {
                 <button
                   type="button"
                   onClick={openPalette}
+                  onMouseEnter={() => void loadCommandPalette()}
+                  onFocus={() => void loadCommandPalette()}
                   className="hidden items-center gap-2 rounded-full border border-[color:var(--border)] bg-[color:var(--surface-1)] px-3 py-1.5 text-xs font-medium text-[color:var(--ink-muted)] transition hover:border-[color:var(--border-strong)] hover:text-[color:var(--ink)] focus-visible:ring-2 focus-visible:ring-[color:var(--brand)] focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--bg)] sm:inline-flex"
                   aria-label="Open command palette"
                 >
@@ -116,6 +260,8 @@ export default function App() {
                   icon={<MagnifyingGlassIcon />}
                   size="sm"
                   onClick={openPalette}
+                  onMouseEnter={() => void loadCommandPalette()}
+                  onFocus={() => void loadCommandPalette()}
                   className="sm:hidden"
                 />
                 <ThemeToggle />
@@ -123,7 +269,12 @@ export default function App() {
                   aria-label="Open navigation menu"
                   icon={<Bars3Icon />}
                   size="sm"
-                  onClick={() => setMobileNavOpen(true)}
+                  onClick={() => {
+                    void loadMobileNav()
+                    setMobileNavOpen(true)
+                  }}
+                  onMouseEnter={() => void loadMobileNav()}
+                  onFocus={() => void loadMobileNav()}
                   className="lg:hidden"
                 />
               </div>
@@ -149,12 +300,21 @@ export default function App() {
         </main>
       </div>
 
-      <CommandPalette open={paletteOpen} onClose={closePalette} />
-      <MobileNav
-        open={mobileNavOpen}
-        onClose={() => setMobileNavOpen(false)}
-        items={NAV_ITEMS}
-      />
+      {paletteOpen ? (
+        <Suspense fallback={null}>
+          <CommandPalette open={paletteOpen} onClose={closePalette} />
+        </Suspense>
+      ) : null}
+      {mobileNavOpen ? (
+        <Suspense fallback={null}>
+          <MobileNav
+            open={mobileNavOpen}
+            onClose={() => setMobileNavOpen(false)}
+            items={NAV_ITEMS}
+            onPrefetch={prefetchRoute}
+          />
+        </Suspense>
+      ) : null}
     </div>
   )
 }

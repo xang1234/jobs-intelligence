@@ -4,7 +4,7 @@ import { ArrowDownRightIcon, ArrowRightIcon, ArrowUpRightIcon } from '@heroicons
 import TrendSparkline from '@/components/TrendSparkline'
 import { Card, Chip, EmptyState, Input, Select, Skeleton } from '@/components/ui'
 import type { ChipIntent, SelectOption } from '@/components/ui'
-import { getCompanyTrend, getOverview, getRoleTrend, getSkillTrends } from '@/services/api'
+import { findSimilarCompanies, getCompanyTrend, getOverview, getRoleTrend, getSkillTrends } from '@/services/api'
 import { getMomentumSignal, TREND_WINDOW_OPTIONS } from '@/services/trendSignals'
 import type { SkillTrendSeries, TrendPoint } from '@/types/api'
 
@@ -165,14 +165,22 @@ export default function TrendsPage() {
 
   const companyTrend = useQuery({
     queryKey: ['companyTrend', companyInput, months],
-    queryFn: () => getCompanyTrend(companyInput, months),
+    queryFn: () => getCompanyTrend(companyInput, months, false),
     enabled: companyInput.trim().length > 0,
+  })
+
+  const similarCompanies = useQuery({
+    queryKey: ['similarCompanies', companyInput],
+    queryFn: () => findSimilarCompanies({ company_name: companyInput, limit: 6 }),
+    enabled: companyInput.trim().length > 0 && companyTrend.data != null,
+    staleTime: 10 * 60 * 1000,
   })
 
   const roleLatest = roleTrend.data?.latest ?? null
   const companyLatest = latestPoint(companyTrend.data?.series ?? [])
   const companyActiveMonths = activeMonths(companyTrend.data?.series ?? [])
   const companySkillSnapshots = companyTrend.data?.top_skills_by_month.filter((snapshot) => snapshot.skills.length) ?? []
+  const similarEmployerProfiles = similarCompanies.data ?? companyTrend.data?.similar_companies ?? []
 
   return (
     <div className="space-y-8">
@@ -397,8 +405,10 @@ export default function TrendsPage() {
               <div className="rounded-[var(--radius-lg)] bg-[color:var(--surface-2)] p-5">
                 <p className="text-sm font-semibold text-[color:var(--ink)]">Similar hiring profiles</p>
                 <div className="mt-4 space-y-2">
-                  {companyTrend.data.similar_companies.length ? (
-                    companyTrend.data.similar_companies.map((company) => (
+                  {similarCompanies.isLoading ? (
+                    Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} height={58} rounded="md" />)
+                  ) : similarEmployerProfiles.length ? (
+                    similarEmployerProfiles.map((company) => (
                       <Card
                         key={company.company_name}
                         radius="md"

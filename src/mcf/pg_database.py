@@ -1631,24 +1631,41 @@ class PostgresDatabase:
         region: str | None = None,
     ) -> list[dict]:
         anchor = self._trend_anchor_date()
-        market_counts = self._get_market_monthly_counts(
-            months,
-            company_name,
-            employment_type,
-            region,
+        labels = self._month_labels(months, anchor)
+        rows = self._fetch_trend_rows(
+            months=months,
+            company_name=company_name,
+            employment_type=employment_type,
+            region=region,
             anchor_date=anchor,
         )
+        market_counts: Counter = Counter()
+        skill_counts: dict[str, Counter] = {skill: Counter() for skill in skills}
+        skill_salarys: dict[str, dict[str, list[int]]] = {skill: {label: [] for label in labels} for skill in skills}
+        skill_needles = {skill: skill.lower() for skill in skills}
+
+        for row in rows:
+            month = posted_month_key(row["posted_date"])
+            if month not in labels:
+                continue
+            market_counts[month] += 1
+            row_skills = (row["skills"] or "").lower()
+            salary = self._salary_midpoint(row)
+            for skill, needle in skill_needles.items():
+                if needle in row_skills:
+                    skill_counts[skill][month] += 1
+                    if salary is not None:
+                        skill_salarys[skill][month].append(salary)
+
+        market_count_map = {label: market_counts.get(label, 0) for label in labels}
         trends = []
         for skill in skills:
-            rows = self._fetch_trend_rows(
-                months=months,
-                company_name=company_name,
-                employment_type=employment_type,
-                region=region,
-                skill=skill,
-                anchor_date=anchor,
+            series = self._series_from_aggregates(
+                month_counts=skill_counts[skill],
+                salary_buckets=skill_salarys[skill],
+                labels=labels,
+                market_counts=market_count_map,
             )
-            series = self._rows_to_series(rows, months, market_counts, anchor_date=anchor)
             trends.append({"skill": skill, "series": series, "latest": series[-1] if series else None})
         return trends
 
@@ -1853,33 +1870,61 @@ class PostgresDatabase:
         return [row["company_name"] for row in rows]
 
     def get_company_stats(self, company_name: str) -> dict:
+        return self.get_company_stats_bulk([company_name]).get(
+            company_name,
+            {"job_count": 0, "avg_salary": None, "top_skills": []},
+        )
+
+    def get_company_stats_bulk(self, company_names: list[str]) -> dict[str, dict]:
+        names = list(dict.fromkeys(name for name in company_names if name))
+        if not names:
+            return {}
+
+        placeholders = ", ".join("%s" for _ in names)
         with self._connection() as conn:
-            row = conn.execute(
-                """
+            rows = conn.execute(
+                f"""
                 SELECT
+                    company_name,
                     COUNT(*) AS job_count,
                     AVG(salary_annual_min) AS avg_salary_min,
                     AVG(salary_annual_max) AS avg_salary_max
                 FROM jobs
-                WHERE company_name = %s
+                WHERE company_name IN ({placeholders})
+                GROUP BY company_name
                 """,
-                (company_name,),
-            ).fetchone()
-            skills_rows = conn.execute(
-                "SELECT skills FROM jobs WHERE company_name = %s AND skills IS NOT NULL",
-                (company_name,),
+                names,
             ).fetchall()
-        skill_counts: Counter = Counter()
-        for result in skills_rows:
-            skill_counts.update([skill.strip() for skill in (result["skills"] or "").split(",") if skill.strip()])
-        avg_salary = None
-        if row["avg_salary_min"] and row["avg_salary_max"]:
-            avg_salary = int((row["avg_salary_min"] + row["avg_salary_max"]) / 2)
-        return {
-            "job_count": row["job_count"],
-            "avg_salary": avg_salary,
-            "top_skills": [name for name, _ in skill_counts.most_common(10)],
+            skills_rows = conn.execute(
+                f"SELECT company_name, skills FROM jobs WHERE company_name IN ({placeholders}) AND skills IS NOT NULL",
+                names,
+            ).fetchall()
+
+        skill_counts: dict[str, Counter] = {name: Counter() for name in names}
+        for row in skills_rows:
+            skill_counts[row["company_name"]].update(
+                [skill.strip() for skill in (row["skills"] or "").split(",") if skill.strip()]
+            )
+
+        stats = {
+            name: {
+                "job_count": 0,
+                "avg_salary": None,
+                "top_skills": [skill for skill, _ in skill_counts[name].most_common(10)],
+            }
+            for name in names
         }
+        for row in rows:
+            avg_salary = None
+            if row["avg_salary_min"] and row["avg_salary_max"]:
+                avg_salary = int((row["avg_salary_min"] + row["avg_salary_max"]) / 2)
+            company_name = row["company_name"]
+            stats[company_name] = {
+                "job_count": row["job_count"],
+                "avg_salary": avg_salary,
+                "top_skills": [skill for skill, _ in skill_counts[company_name].most_common(10)],
+            }
+        return stats
 
     def get_all_unique_skills(self) -> list[str]:
         with self._connection() as conn:

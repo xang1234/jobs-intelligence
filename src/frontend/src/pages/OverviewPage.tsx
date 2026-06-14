@@ -16,7 +16,7 @@ function formatMoney(value: number | null): string {
 }
 
 export default function OverviewPage() {
-  const overview = useQuery({ queryKey: ['overview'], queryFn: () => getOverview(12) })
+  const overview = useQuery({ queryKey: ['overview', 3], queryFn: () => getOverview(3) })
   const stats = useQuery({ queryKey: ['stats'], queryFn: getStats })
   const popular = useQuery({
     queryKey: ['popularQueries'],
