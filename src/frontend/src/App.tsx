@@ -71,7 +71,6 @@ export default function App() {
     (to: string) => {
       void import('@/services/api').then(
         ({
-          findSimilarCompanies,
           getCompanyTrend,
           getHealth,
           getOverview,
@@ -126,10 +125,6 @@ export default function App() {
             void queryClient.prefetchQuery({
               queryKey: ['companyTrend', TREND_PREFETCH.company, TREND_PREFETCH.months],
               queryFn: () => getCompanyTrend(TREND_PREFETCH.company, TREND_PREFETCH.months, false),
-            })
-            void queryClient.prefetchQuery({
-              queryKey: ['similarCompanies', TREND_PREFETCH.company],
-              queryFn: () => findSimilarCompanies({ company_name: TREND_PREFETCH.company, limit: 6 }),
             })
           }
 

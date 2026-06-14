@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowDownRightIcon, ArrowRightIcon, ArrowUpRightIcon } from '@heroicons/react/20/solid'
 import TrendSparkline from '@/components/TrendSparkline'
-import { Card, Chip, EmptyState, Input, Select, Skeleton } from '@/components/ui'
+import { Button, Card, Chip, EmptyState, Input, Select, Skeleton } from '@/components/ui'
 import type { ChipIntent, SelectOption } from '@/components/ui'
 import { findSimilarCompanies, getCompanyTrend, getOverview, getRoleTrend, getSkillTrends } from '@/services/api'
 import { getMomentumSignal, TREND_WINDOW_OPTIONS } from '@/services/trendSignals'
@@ -128,6 +128,9 @@ export default function TrendsPage() {
   const [months, setMonths] = useState<number>(3)
   const [employmentType, setEmploymentType] = useState('')
   const [region, setRegion] = useState('')
+  const [similarProfilesCompany, setSimilarProfilesCompany] = useState<string | null>(null)
+  const companyName = companyInput.trim()
+  const similarProfilesRequested = similarProfilesCompany === companyName
 
   const skills = useMemo(
     () => skillInput.split(',').map((item) => item.trim()).filter(Boolean).slice(0, 3),
@@ -164,15 +167,15 @@ export default function TrendsPage() {
   })
 
   const companyTrend = useQuery({
-    queryKey: ['companyTrend', companyInput, months],
-    queryFn: () => getCompanyTrend(companyInput, months, false),
-    enabled: companyInput.trim().length > 0,
+    queryKey: ['companyTrend', companyName, months],
+    queryFn: () => getCompanyTrend(companyName, months, false),
+    enabled: companyName.length > 0,
   })
 
   const similarCompanies = useQuery({
-    queryKey: ['similarCompanies', companyInput],
-    queryFn: () => findSimilarCompanies({ company_name: companyInput, limit: 6 }),
-    enabled: companyInput.trim().length > 0 && companyTrend.data != null,
+    queryKey: ['similarCompanies', companyName],
+    queryFn: () => findSimilarCompanies({ company_name: companyName, limit: 6 }),
+    enabled: similarProfilesRequested && companyName.length > 0,
     staleTime: 10 * 60 * 1000,
   })
 
@@ -180,7 +183,7 @@ export default function TrendsPage() {
   const companyLatest = latestPoint(companyTrend.data?.series ?? [])
   const companyActiveMonths = activeMonths(companyTrend.data?.series ?? [])
   const companySkillSnapshots = companyTrend.data?.top_skills_by_month.filter((snapshot) => snapshot.skills.length) ?? []
-  const similarEmployerProfiles = similarCompanies.data ?? companyTrend.data?.similar_companies ?? []
+  const similarEmployerProfiles = similarProfilesRequested ? (similarCompanies.data ?? []) : []
 
   return (
     <div className="space-y-8">
@@ -403,9 +406,30 @@ export default function TrendsPage() {
               </div>
 
               <div className="rounded-[var(--radius-lg)] bg-[color:var(--surface-2)] p-5">
-                <p className="text-sm font-semibold text-[color:var(--ink)]">Similar hiring profiles</p>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-[color:var(--ink)]">Similar hiring profiles</p>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    loading={similarCompanies.isFetching}
+                    disabled={!companyName}
+                    onClick={() => {
+                      if (similarProfilesRequested) {
+                        void similarCompanies.refetch()
+                      } else {
+                        setSimilarProfilesCompany(companyName)
+                      }
+                    }}
+                  >
+                    {similarProfilesRequested ? 'Refresh profiles' : 'Load similar profiles'}
+                  </Button>
+                </div>
                 <div className="mt-4 space-y-2">
-                  {similarCompanies.isLoading ? (
+                  {!similarProfilesRequested ? (
+                    <p className="text-sm text-[color:var(--ink-subtle)]">
+                      Load employer look-alikes only when you need the heavier comparison.
+                    </p>
+                  ) : similarCompanies.isLoading ? (
                     Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} height={58} rounded="md" />)
                   ) : similarEmployerProfiles.length ? (
                     similarEmployerProfiles.map((company) => (
