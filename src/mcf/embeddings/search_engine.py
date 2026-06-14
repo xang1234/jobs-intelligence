@@ -34,6 +34,7 @@ from typing import Optional
 import numpy as np
 from cachetools import TTLCache
 
+from ..database import is_broad_singapore_region
 from ..db_factory import open_database
 from .backends import DEFAULT_EMBEDDING_BACKEND, resolve_model_version
 from .faiss_backend import FAISSVectorBackend
@@ -600,7 +601,7 @@ class SemanticSearchEngine:
 
             if employment_type and job.get("employment_type") != employment_type:
                 continue
-            if region and job.get("region") != region:
+            if region and not is_broad_singapore_region(region) and job.get("region") != region:
                 continue
             if normalized_titles and not any(title in (job.get("title", "").lower()) for title in normalized_titles):
                 continue

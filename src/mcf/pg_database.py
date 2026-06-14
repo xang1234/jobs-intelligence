@@ -14,7 +14,7 @@ from typing import Any, Iterator, Optional
 
 import numpy as np
 
-from .database import MCFDatabase
+from .database import MCFDatabase, coerce_posted_date, is_broad_singapore_region, posted_month_key
 from .models import Job
 
 logger = logging.getLogger(__name__)
@@ -620,7 +620,7 @@ class PostgresDatabase:
         if employment_type:
             conditions.append("employment_type = %s")
             params.append(employment_type)
-        if region:
+        if region and not is_broad_singapore_region(region):
             conditions.append("region = %s")
             params.append(region)
 
@@ -1428,10 +1428,35 @@ class PostgresDatabase:
     _median = staticmethod(MCFDatabase._median)
     _salary_midpoint = staticmethod(MCFDatabase._salary_midpoint)
     _annotate_momentum = staticmethod(MCFDatabase._annotate_momentum)
+    _representative_anchor_date = staticmethod(MCFDatabase._representative_anchor_date)
 
     @classmethod
-    def _month_labels(cls, months: int) -> list[str]:
-        return MCFDatabase._month_labels(months)
+    def _month_labels(cls, months: int, anchor_date: date | None = None) -> list[str]:
+        return MCFDatabase._month_labels(months, anchor_date)
+
+    def _latest_posted_date(self) -> Optional[date]:
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT MAX(posted_date) AS latest FROM jobs WHERE posted_date IS NOT NULL"
+            ).fetchone()
+        if not row:
+            return None
+        return coerce_posted_date(row["latest"])
+
+    def _trend_anchor_date(self) -> date:
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT TO_CHAR(posted_date, 'YYYY-MM') AS month_key,
+                       COUNT(*) AS job_count,
+                       MAX(posted_date) AS latest_posted_date
+                FROM jobs
+                WHERE posted_date IS NOT NULL
+                GROUP BY month_key
+                ORDER BY month_key DESC
+                """
+            ).fetchall()
+        return self._representative_anchor_date(rows) or date.today()
 
     def _build_filter_conditions(
         self,
@@ -1453,7 +1478,7 @@ class PostgresDatabase:
         if employment_type:
             conditions.append("employment_type = %s")
             params.append(employment_type)
-        if region:
+        if region and not is_broad_singapore_region(region):
             conditions.append("region = %s")
             params.append(region)
         if keyword:
@@ -1473,8 +1498,10 @@ class PostgresDatabase:
         keyword: str | None = None,
         company_exact: bool = False,
         skill: str | None = None,
+        anchor_date: date | None = None,
     ) -> list[dict]:
-        start_month = self._subtract_months(date.today().replace(day=1), months - 1)
+        anchor = anchor_date or self._trend_anchor_date()
+        start_month = self._subtract_months(anchor.replace(day=1), months - 1)
         conditions = ["posted_date IS NOT NULL", "posted_date >= %s"]
         params: list[Any] = [start_month]
         extra_conditions, extra_params = self._build_filter_conditions(
@@ -1501,23 +1528,39 @@ class PostgresDatabase:
                 params,
             ).fetchall()
 
+    def fetch_recent_market_rows(self, start_month: date) -> list[dict]:
+        with self._connection() as conn:
+            return conn.execute(
+                """
+                SELECT posted_date, title, company_name, categories, skills,
+                       salary_annual_min, salary_annual_max, title_family, industry_bucket
+                FROM jobs
+                WHERE posted_date IS NOT NULL
+                  AND posted_date >= %s
+                ORDER BY posted_date ASC
+                """,
+                (start_month,),
+            ).fetchall()
+
     def _get_market_monthly_counts(
         self,
         months: int,
         company_name: str | None = None,
         employment_type: str | None = None,
         region: str | None = None,
+        anchor_date: date | None = None,
     ) -> dict[str, int]:
+        anchor = anchor_date or self._trend_anchor_date()
         rows = self._fetch_trend_rows(
             months=months,
             company_name=company_name,
             employment_type=employment_type,
             region=region,
+            anchor_date=anchor,
         )
-        counts = {label: 0 for label in self._month_labels(months)}
+        counts = {label: 0 for label in self._month_labels(months, anchor)}
         for row in rows:
-            posted = row["posted_date"]
-            month = posted.strftime("%Y-%m") if hasattr(posted, "strftime") else str(posted)[:7]
+            month = posted_month_key(row["posted_date"])
             if month in counts:
                 counts[month] += 1
         return counts
@@ -1527,8 +1570,9 @@ class PostgresDatabase:
         rows: list[dict],
         months: int,
         market_counts: Optional[dict[str, int]] = None,
+        anchor_date: date | None = None,
     ) -> list[dict]:
-        labels = self._month_labels(months)
+        labels = self._month_labels(months, anchor_date or self._trend_anchor_date())
         points = {
             label: {
                 "month": label,
@@ -1541,8 +1585,7 @@ class PostgresDatabase:
         }
         salary_buckets = {label: [] for label in labels}
         for row in rows:
-            posted = row["posted_date"]
-            month = posted.strftime("%Y-%m") if hasattr(posted, "strftime") else str(posted)[:7]
+            month = posted_month_key(row["posted_date"])
             if month not in points:
                 continue
             points[month]["job_count"] += 1
@@ -1589,7 +1632,14 @@ class PostgresDatabase:
         employment_type: str | None = None,
         region: str | None = None,
     ) -> list[dict]:
-        market_counts = self._get_market_monthly_counts(months, company_name, employment_type, region)
+        anchor = self._trend_anchor_date()
+        market_counts = self._get_market_monthly_counts(
+            months,
+            company_name,
+            employment_type,
+            region,
+            anchor_date=anchor,
+        )
         trends = []
         for skill in skills:
             rows = self._fetch_trend_rows(
@@ -1598,8 +1648,9 @@ class PostgresDatabase:
                 employment_type=employment_type,
                 region=region,
                 skill=skill,
+                anchor_date=anchor,
             )
-            series = self._rows_to_series(rows, months, market_counts)
+            series = self._rows_to_series(rows, months, market_counts, anchor_date=anchor)
             trends.append({"skill": skill, "series": series, "latest": series[-1] if series else None})
         return trends
 
@@ -1611,19 +1662,38 @@ class PostgresDatabase:
         employment_type: str | None = None,
         region: str | None = None,
     ) -> dict:
-        rows = self._fetch_trend_rows(months, company_name, employment_type, region, keyword=query)
-        market_counts = self._get_market_monthly_counts(months, company_name, employment_type, region)
-        series = self._rows_to_series(rows, months, market_counts)
+        anchor = self._trend_anchor_date()
+        rows = self._fetch_trend_rows(
+            months,
+            company_name,
+            employment_type,
+            region,
+            keyword=query,
+            anchor_date=anchor,
+        )
+        market_counts = self._get_market_monthly_counts(
+            months,
+            company_name,
+            employment_type,
+            region,
+            anchor_date=anchor,
+        )
+        series = self._rows_to_series(rows, months, market_counts, anchor_date=anchor)
         return {"query": query, "series": series, "latest": series[-1] if series else None}
 
     def get_company_trend(self, company_name: str, months: int = 12) -> dict:
-        rows = self._fetch_trend_rows(months=months, company_name=company_name, company_exact=True)
-        market_counts = self._get_market_monthly_counts(months=months)
-        series = self._rows_to_series(rows, months, market_counts)
-        skills_by_month: dict[str, Counter] = {label: Counter() for label in self._month_labels(months)}
+        anchor = self._trend_anchor_date()
+        rows = self._fetch_trend_rows(
+            months=months,
+            company_name=company_name,
+            company_exact=True,
+            anchor_date=anchor,
+        )
+        market_counts = self._get_market_monthly_counts(months=months, anchor_date=anchor)
+        series = self._rows_to_series(rows, months, market_counts, anchor_date=anchor)
+        skills_by_month: dict[str, Counter] = {label: Counter() for label in self._month_labels(months, anchor)}
         for row in rows:
-            posted = row["posted_date"]
-            month = posted.strftime("%Y-%m") if hasattr(posted, "strftime") else str(posted)[:7]
+            month = posted_month_key(row["posted_date"])
             for skill in [item.strip() for item in (row["skills"] or "").split(",") if item.strip()]:
                 skills_by_month[month][skill] += 1
         top_skills_by_month = [
@@ -1638,10 +1708,11 @@ class PostgresDatabase:
         return {"company_name": company_name, "series": series, "top_skills_by_month": top_skills_by_month}
 
     def get_overview(self, months: int = 12) -> dict:
-        labels = self._month_labels(months)
+        anchor = self._trend_anchor_date()
+        labels = self._month_labels(months, anchor)
         current_month = labels[-1]
         previous_month = labels[-2] if len(labels) > 1 else labels[-1]
-        rows = self._fetch_trend_rows(months=months)
+        rows = self._fetch_trend_rows(months=months, anchor_date=anchor)
         market_counts: Counter = Counter()
         market_salarys: dict[str, list[int]] = {label: [] for label in labels}
         skill_counts: dict[str, Counter] = defaultdict(Counter)
@@ -1652,8 +1723,7 @@ class PostgresDatabase:
         unique_companies: set[str] = set()
         salary_midpoints: list[int] = []
         for row in rows:
-            posted = row["posted_date"]
-            month = posted.strftime("%Y-%m") if hasattr(posted, "strftime") else str(posted)[:7]
+            month = posted_month_key(row["posted_date"])
             if month not in market_salarys:
                 continue
             salary = self._salary_midpoint(row)

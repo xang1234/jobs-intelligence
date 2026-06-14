@@ -143,6 +143,67 @@ def test_overview_avoids_nested_trend_queries(empty_db: MCFDatabase):
     assert overview["rising_companies"]
 
 
+def test_overview_anchors_current_month_to_latest_available_job(empty_db: MCFDatabase):
+    _insert_job(
+        empty_db,
+        title="Data Scientist",
+        company_name="Stale But Freshest",
+        skills=["Python", "SQL"],
+        posted_days_ago=posted_days_ago_for_month_offset(1, day=20),
+        salary_min=10000,
+        salary_max=14000,
+    )
+
+    overview = empty_db.get_overview(months=2)
+
+    assert overview["headline_metrics"]["current_month_jobs"] == 1
+    assert overview["market_insights"][0]["value"] == 1
+
+
+def test_overview_anchors_to_representative_month_when_latest_month_is_sparse(empty_db: MCFDatabase):
+    for idx in range(12):
+        _insert_job(
+            empty_db,
+            title=f"Data Scientist {idx}",
+            company_name=f"Representative {idx}",
+            skills=["Python", "SQL"],
+            posted_days_ago=posted_days_ago_for_month_offset(1, day=10 + (idx % 5)),
+            salary_min=10000,
+            salary_max=14000,
+        )
+    _insert_job(
+        empty_db,
+        title="Data Scientist Sparse",
+        company_name="Sparse Latest",
+        skills=["Python", "SQL"],
+        posted_days_ago=posted_days_ago_for_month_offset(0, day=1),
+        salary_min=10000,
+        salary_max=14000,
+    )
+
+    overview = empty_db.get_overview(months=3)
+
+    assert overview["headline_metrics"]["current_month_jobs"] == 12
+    assert overview["market_insights"][0]["value"] == 12
+
+
+def test_search_jobs_treats_singapore_as_broad_market_region(empty_db: MCFDatabase):
+    _insert_job(
+        empty_db,
+        title="Data Scientist",
+        company_name="Hosted Rows Ltd",
+        skills=["Python", "SQL"],
+        posted_days_ago=posted_days_ago_for_month_offset(0, day=10),
+        salary_min=10000,
+        salary_max=14000,
+        region="",
+    )
+
+    results = empty_db.search_jobs(region="Singapore", limit=5)
+
+    assert [job["title"] for job in results] == ["Data Scientist"]
+
+
 def test_search_results_include_explanations(temp_dir: Path, empty_db: MCFDatabase):
     _insert_job(
         empty_db,
@@ -209,6 +270,34 @@ def test_profile_match_returns_fit_breakdown(temp_dir: Path, empty_db: MCFDataba
     assert top.explanations.skill_overlap_score is not None
     assert top.explanations.overall_fit is not None
     assert "Python" in top.matched_skills
+
+
+def test_profile_match_treats_singapore_as_broad_market_region(temp_dir: Path, empty_db: MCFDatabase):
+    _insert_job(
+        empty_db,
+        title="Senior Data Scientist",
+        company_name="Hosted Rows Ltd",
+        skills=["Python", "SQL", "Machine Learning"],
+        posted_days_ago=posted_days_ago_for_month_offset(0, day=12),
+        salary_min=12000,
+        salary_max=16000,
+        region="",
+    )
+
+    engine = SemanticSearchEngine(
+        db_path=str(empty_db.db_path),
+        index_dir=temp_dir / "missing-indexes",
+    )
+
+    result = engine.match_profile(
+        profile_text="Senior data scientist with Python, SQL, and machine learning experience.",
+        target_titles=["Data Scientist"],
+        region="Singapore",
+        limit=5,
+    )
+
+    assert result["results"]
+    assert result["results"][0].title == "Senior Data Scientist"
 
 
 def test_profile_match_degraded_mode_uses_fallback_relevance(temp_dir: Path, empty_db: MCFDatabase):

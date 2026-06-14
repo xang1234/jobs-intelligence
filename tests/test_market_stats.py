@@ -1,3 +1,6 @@
+from datetime import date
+from unittest.mock import patch
+
 from src.mcf.career_delta import CareerDeltaRequest
 from src.mcf.market_stats import (
     MISSING_TREND_SERIES,
@@ -163,6 +166,44 @@ def test_cache_refreshes_after_ttl_and_invalidate(empty_db):
     cache.invalidate()
     refreshed = cache.get_skill_stats("Python")
     assert refreshed.job_count == 2
+
+
+def test_market_stats_fetch_recent_rows_through_database_abstraction(empty_db):
+    cache = MarketStatsCache(empty_db, months=3)
+
+    with patch.object(empty_db, "fetch_recent_market_rows", return_value=[], create=True) as fetch_rows:
+        cache.refresh(force=True)
+
+    fetch_rows.assert_called_once()
+    assert isinstance(fetch_rows.call_args.args[0], date)
+
+
+def test_market_stats_accepts_database_native_posted_date_objects(empty_db):
+    labels = empty_db._month_labels(3)
+    year, month = [int(part) for part in labels[-1].split("-")]
+    cache = MarketStatsCache(empty_db, months=3)
+
+    with patch.object(
+        cache,
+        "_fetch_recent_rows",
+        return_value=[
+            {
+                "posted_date": date(year, month, 15),
+                "title": "Data Scientist",
+                "company_name": "Postgres Rows Ltd",
+                "categories": "Data Science",
+                "skills": "Python, SQL",
+                "salary_annual_min": 120000,
+                "salary_annual_max": 180000,
+                "title_family": "data-scientist",
+                "industry_bucket": "technology/data_and_ai",
+            }
+        ],
+    ):
+        aggregate = cache.get_skill_stats("Python")
+
+    assert aggregate.job_count == 1
+    assert aggregate.median_salary_annual == 150000
 
 
 def test_market_snapshot_returns_request_relevant_aggregates(empty_db):

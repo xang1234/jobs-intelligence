@@ -16,7 +16,7 @@ from datetime import date
 from typing import Callable, Optional
 
 from .career_delta import CareerDeltaRequest
-from .database import MCFDatabase
+from .database import MCFDatabase, posted_month_key
 from .industry_taxonomy import (
     IndustryClassification,
     classification_from_bucket,
@@ -145,8 +145,9 @@ class MarketStatsCache:
 
     def _build_snapshot(self) -> MarketStatsSnapshot:
         now = self.clock()
-        labels = self.db._month_labels(self.months)
-        rows = self._fetch_recent_rows()
+        anchor = self._latest_anchor_date()
+        labels = self.db._month_labels(self.months, anchor)
+        rows = self._fetch_recent_rows(anchor)
 
         market_counts: Counter[str] = Counter()
         skill_counts: dict[str, Counter[str]] = defaultdict(Counter)
@@ -173,7 +174,7 @@ class MarketStatsCache:
                 company_industries[company_name] = inferred
 
         for row in rows:
-            month = row["posted_date"][:7]
+            month = posted_month_key(row["posted_date"])
             if month not in labels:
                 continue
 
@@ -243,20 +244,19 @@ class MarketStatsCache:
         )
         return snapshot
 
-    def _fetch_recent_rows(self) -> list:
-        start_month = self.db._subtract_months(date.today().replace(day=1), self.months - 1)
-        with self.db._connection() as conn:
-            return conn.execute(
-                """
-                SELECT posted_date, title, company_name, categories, skills,
-                       salary_annual_min, salary_annual_max, title_family, industry_bucket
-                FROM jobs
-                WHERE posted_date IS NOT NULL
-                  AND posted_date >= ?
-                ORDER BY posted_date ASC
-                """,
-                (start_month.isoformat(),),
-            ).fetchall()
+    def _latest_anchor_date(self) -> date:
+        trend_anchor_date = getattr(self.db, "_trend_anchor_date", None)
+        if trend_anchor_date is not None:
+            return trend_anchor_date()
+        latest_posted_date = getattr(self.db, "_latest_posted_date", None)
+        if latest_posted_date is None:
+            return date.today()
+        return latest_posted_date() or date.today()
+
+    def _fetch_recent_rows(self, anchor_date: date | None = None) -> list:
+        anchor = anchor_date or self._latest_anchor_date()
+        start_month = self.db._subtract_months(anchor.replace(day=1), self.months - 1)
+        return self.db.fetch_recent_market_rows(start_month)
 
     def _build_aggregate(
         self,

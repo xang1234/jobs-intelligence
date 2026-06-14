@@ -23,6 +23,7 @@ def _insert_job(
     posted_days_ago: int,
     salary_min: int,
     salary_max: int,
+    region: str = "Central",
 ) -> None:
     job = generate_test_job(
         title=title,
@@ -33,6 +34,8 @@ def _insert_job(
     )
     job.categories = [Category(category=category) for category in categories]
     job.metadata = generate_metadata(posted_days_ago=posted_days_ago)
+    if job.address:
+        job.address.region = region
     db.upsert_job(job)
 
 
@@ -121,6 +124,38 @@ def test_provider_keeps_pool_broad_even_with_target_titles(temp_dir, empty_db):
     assert "Analytics Engineer" in titles
     assert titles["Senior Data Scientist"] is True
     assert titles["Analytics Engineer"] is False
+
+
+def test_provider_treats_singapore_location_as_broad_market_region(temp_dir, empty_db):
+    _insert_job(
+        empty_db,
+        title="Senior Data Scientist",
+        company_name="Hosted Rows Ltd",
+        skills=["Python", "SQL", "Machine Learning"],
+        categories=["Data Science"],
+        posted_days_ago=2,
+        salary_min=12000,
+        salary_max=16000,
+        region="",
+    )
+
+    engine = SemanticSearchEngine(
+        db_path=str(empty_db.db_path),
+        index_dir=temp_dir / "missing-indexes",
+    )
+    provider = SearchEngineCareerDeltaProvider(engine, minimum_pool_size=10)
+
+    pool = provider.build_candidate_pool(
+        CareerDeltaRequest(
+            profile_text="Senior data scientist with Python, SQL, and machine learning experience.",
+            target_titles=("Data Scientist",),
+            location="Singapore",
+            limit=5,
+        )
+    )
+
+    assert pool.candidates
+    assert pool.candidates[0].title == "Senior Data Scientist"
 
 
 def test_provider_records_job_side_gap_skills_for_addition_scenarios(temp_dir, empty_db):
