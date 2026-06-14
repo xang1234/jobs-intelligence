@@ -30,6 +30,7 @@ from .api_client import MCFAPIError, MCFClient, MCFNotFoundError, MCFRateLimitEr
 from .batch_logger import BatchLogger
 from .db_factory import open_database
 from .models import Job
+from .pg_database import PostgresDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -146,8 +147,9 @@ class HistoricalScraper:
         """Async context manager entry."""
         self._client = MCFClient(requests_per_second=self.initial_rps)
         await self._client.__aenter__()
-        self._write_conn = self.db._connect(write_optimized=True)
-        self.batch_logger.conn = self._write_conn
+        if not isinstance(self.db, PostgresDatabase):
+            self._write_conn = self.db._connect(write_optimized=True)
+            self.batch_logger.conn = self._write_conn
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
