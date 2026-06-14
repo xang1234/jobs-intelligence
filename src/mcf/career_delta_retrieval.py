@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections import defaultdict
 
 from .career_delta import CareerDeltaCandidate, CareerDeltaCandidatePool, CareerDeltaRequest
+from .database import is_broad_singapore_region
 from .embeddings.models import SearchRequest
 from .embeddings.search_engine import SemanticSearchEngine
 from .industry_taxonomy import (
@@ -69,7 +70,11 @@ class SearchEngineCareerDeltaProvider:
             job = jobs.get(uuid)
             if not job:
                 continue
-            if request.location and job.get("region") != request.location:
+            if (
+                request.location
+                and not is_broad_singapore_region(request.location)
+                and job.get("region") != request.location
+            ):
                 continue
 
             title_match = bool(

@@ -28,6 +28,43 @@ from .models import Job
 
 logger = logging.getLogger(__name__)
 
+REPRESENTATIVE_MONTH_MIN_JOBS = 10
+REPRESENTATIVE_MONTH_MIN_RATIO = 0.10
+
+
+def coerce_posted_date(value: Any) -> Optional[date]:
+    """Return a date object from SQLite strings or database-native date values."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if hasattr(value, "year") and hasattr(value, "month") and hasattr(value, "day"):
+        return date(int(value.year), int(value.month), int(value.day))
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
+def posted_month_key(value: Any) -> str:
+    """Return a YYYY-MM key from SQLite strings or database-native date values."""
+    posted = coerce_posted_date(value)
+    if posted is not None:
+        return posted.strftime("%Y-%m")
+    return str(value)[:7]
+
+
+def is_broad_singapore_region(region: str | None) -> bool:
+    """Treat Singapore-level filters as the whole local market, not a subregion."""
+    if not region:
+        return False
+    normalized = region.strip().lower().replace(".", "")
+    return normalized in {"singapore", "sg"}
+
+
 # SQL schema definitions
 SCHEMA_SQL = """
 -- Main jobs table: current state of each job
@@ -1006,7 +1043,7 @@ class MCFDatabase:
             conditions.append("employment_type = ?")
             params.append(employment_type)
 
-        if region:
+        if region and not is_broad_singapore_region(region):
             conditions.append("region = ?")
             params.append(region)
 
@@ -2293,13 +2330,57 @@ class MCFDatabase:
         return date(year, month, 1)
 
     @classmethod
-    def _month_labels(cls, months: int) -> list[str]:
+    def _month_labels(cls, months: int, anchor_date: date | None = None) -> list[str]:
         """Generate YYYY-MM labels from oldest to newest."""
-        start = date.today().replace(day=1)
+        start = (anchor_date or date.today()).replace(day=1)
         labels = []
         for offset in range(months - 1, -1, -1):
             labels.append(cls._subtract_months(start, offset).strftime("%Y-%m"))
         return labels
+
+    def _latest_posted_date(self) -> Optional[date]:
+        """Return the freshest posted date available in the jobs table."""
+        with self._connection() as conn:
+            row = conn.execute("SELECT MAX(posted_date) AS latest FROM jobs WHERE posted_date IS NOT NULL").fetchone()
+        if not row:
+            return None
+        return coerce_posted_date(row["latest"])
+
+    @staticmethod
+    def _representative_anchor_date(month_rows: list[Any]) -> Optional[date]:
+        """Choose the latest month with enough volume to represent market trends."""
+        if not month_rows:
+            return None
+
+        max_count = max(int(row["job_count"]) for row in month_rows)
+        newest = coerce_posted_date(month_rows[0]["latest_posted_date"])
+        if max_count < REPRESENTATIVE_MONTH_MIN_JOBS:
+            return newest
+
+        representative_floor = max(
+            REPRESENTATIVE_MONTH_MIN_JOBS,
+            int(max_count * REPRESENTATIVE_MONTH_MIN_RATIO),
+        )
+        for row in month_rows:
+            if int(row["job_count"]) >= representative_floor:
+                return coerce_posted_date(row["latest_posted_date"])
+        return newest
+
+    def _trend_anchor_date(self) -> date:
+        """Anchor market windows to available data, falling back to today when empty."""
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT substr(posted_date, 1, 7) AS month_key,
+                       COUNT(*) AS job_count,
+                       MAX(posted_date) AS latest_posted_date
+                FROM jobs
+                WHERE posted_date IS NOT NULL
+                GROUP BY month_key
+                ORDER BY month_key DESC
+                """
+            ).fetchall()
+        return self._representative_anchor_date(rows) or date.today()
 
     @staticmethod
     def _median(values: list[int]) -> Optional[int]:
@@ -2371,7 +2452,7 @@ class MCFDatabase:
             conditions.append("employment_type = ?")
             params.append(employment_type)
 
-        if region:
+        if region and not is_broad_singapore_region(region):
             conditions.append("region = ?")
             params.append(region)
 
@@ -2393,9 +2474,11 @@ class MCFDatabase:
         keyword: str | None = None,
         company_exact: bool = False,
         skill: str | None = None,
+        anchor_date: date | None = None,
     ) -> list[sqlite3.Row]:
         """Fetch minimally shaped rows for time-series aggregation."""
-        start_month = self._subtract_months(date.today().replace(day=1), months - 1)
+        anchor = anchor_date or self._trend_anchor_date()
+        start_month = self._subtract_months(anchor.replace(day=1), months - 1)
         conditions = ["posted_date IS NOT NULL", "posted_date >= ?"]
         params: list[Any] = [start_month.isoformat()]
 
@@ -2426,23 +2509,41 @@ class MCFDatabase:
                 params,
             ).fetchall()
 
+    def fetch_recent_market_rows(self, start_month: date) -> list[sqlite3.Row]:
+        """Fetch recent rows used to build cached market aggregates."""
+        with self._connection() as conn:
+            return conn.execute(
+                """
+                SELECT posted_date, title, company_name, categories, skills,
+                       salary_annual_min, salary_annual_max, title_family, industry_bucket
+                FROM jobs
+                WHERE posted_date IS NOT NULL
+                  AND posted_date >= ?
+                ORDER BY posted_date ASC
+                """,
+                (start_month.isoformat(),),
+            ).fetchall()
+
     def _get_market_monthly_counts(
         self,
         months: int,
         company_name: str | None = None,
         employment_type: str | None = None,
         region: str | None = None,
+        anchor_date: date | None = None,
     ) -> dict[str, int]:
         """Get baseline monthly job counts for market share calculations."""
+        anchor = anchor_date or self._trend_anchor_date()
         rows = self._fetch_trend_rows(
             months=months,
             company_name=company_name,
             employment_type=employment_type,
             region=region,
+            anchor_date=anchor,
         )
-        counts = {label: 0 for label in self._month_labels(months)}
+        counts = {label: 0 for label in self._month_labels(months, anchor)}
         for row in rows:
-            month = row["posted_date"][:7]
+            month = posted_month_key(row["posted_date"])
             if month in counts:
                 counts[month] += 1
         return counts
@@ -2452,9 +2553,10 @@ class MCFDatabase:
         rows: list[sqlite3.Row],
         months: int,
         market_counts: Optional[dict[str, int]] = None,
+        anchor_date: date | None = None,
     ) -> list[dict]:
         """Convert raw rows into a dense monthly trend series."""
-        labels = self._month_labels(months)
+        labels = self._month_labels(months, anchor_date or self._trend_anchor_date())
         points = {
             label: {
                 "month": label,
@@ -2468,7 +2570,7 @@ class MCFDatabase:
         salary_buckets: dict[str, list[int]] = {label: [] for label in labels}
 
         for row in rows:
-            month = row["posted_date"][:7]
+            month = posted_month_key(row["posted_date"])
             if month not in points:
                 continue
             points[month]["job_count"] += 1
@@ -2519,11 +2621,13 @@ class MCFDatabase:
         region: str | None = None,
     ) -> list[dict]:
         """Return monthly trend series for each requested skill."""
+        anchor = self._trend_anchor_date()
         market_counts = self._get_market_monthly_counts(
             months=months,
             company_name=company_name,
             employment_type=employment_type,
             region=region,
+            anchor_date=anchor,
         )
         trends = []
         for skill in skills:
@@ -2533,8 +2637,9 @@ class MCFDatabase:
                 employment_type=employment_type,
                 region=region,
                 skill=skill,
+                anchor_date=anchor,
             )
-            series = self._rows_to_series(rows, months, market_counts)
+            series = self._rows_to_series(rows, months, market_counts, anchor_date=anchor)
             trends.append(
                 {
                     "skill": skill,
@@ -2553,20 +2658,23 @@ class MCFDatabase:
         region: str | None = None,
     ) -> dict:
         """Return monthly trend data for a role/query string."""
+        anchor = self._trend_anchor_date()
         rows = self._fetch_trend_rows(
             months=months,
             company_name=company_name,
             employment_type=employment_type,
             region=region,
             keyword=query,
+            anchor_date=anchor,
         )
         market_counts = self._get_market_monthly_counts(
             months=months,
             company_name=company_name,
             employment_type=employment_type,
             region=region,
+            anchor_date=anchor,
         )
-        series = self._rows_to_series(rows, months, market_counts)
+        series = self._rows_to_series(rows, months, market_counts, anchor_date=anchor)
         return {
             "query": query,
             "series": series,
@@ -2575,17 +2683,19 @@ class MCFDatabase:
 
     def get_company_trend(self, company_name: str, months: int = 12) -> dict:
         """Return hiring trend and skill mix for a single company."""
+        anchor = self._trend_anchor_date()
         rows = self._fetch_trend_rows(
             months=months,
             company_name=company_name,
             company_exact=True,
+            anchor_date=anchor,
         )
-        market_counts = self._get_market_monthly_counts(months=months)
-        series = self._rows_to_series(rows, months, market_counts)
+        market_counts = self._get_market_monthly_counts(months=months, anchor_date=anchor)
+        series = self._rows_to_series(rows, months, market_counts, anchor_date=anchor)
 
-        skills_by_month: dict[str, Counter] = {label: Counter() for label in self._month_labels(months)}
+        skills_by_month: dict[str, Counter] = {label: Counter() for label in self._month_labels(months, anchor)}
         for row in rows:
-            month = row["posted_date"][:7]
+            month = posted_month_key(row["posted_date"])
             raw_skills = row["skills"] or ""
             for skill in [item.strip() for item in raw_skills.split(",") if item.strip()]:
                 skills_by_month[month][skill] += 1
@@ -2608,10 +2718,11 @@ class MCFDatabase:
 
     def get_overview(self, months: int = 12) -> dict:
         """Return summary cards and top movers for the homepage overview."""
-        labels = self._month_labels(months)
+        anchor = self._trend_anchor_date()
+        labels = self._month_labels(months, anchor)
         current_month = labels[-1]
         previous_month = labels[-2] if len(labels) > 1 else labels[-1]
-        rows = self._fetch_trend_rows(months=months)
+        rows = self._fetch_trend_rows(months=months, anchor_date=anchor)
 
         market_counts: Counter = Counter()
         market_salarys: dict[str, list[int]] = {label: [] for label in labels}
@@ -2624,7 +2735,7 @@ class MCFDatabase:
         salary_midpoints: list[int] = []
 
         for row in rows:
-            month = row["posted_date"][:7]
+            month = posted_month_key(row["posted_date"])
             if month not in market_salarys:
                 continue
 

@@ -1,18 +1,19 @@
-import { useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom'
 import { Bars3Icon, MagnifyingGlassIcon } from '@heroicons/react/24/outline'
-import MatchLabPage from '@/pages/MatchLabPage'
-import OverviewPage from '@/pages/OverviewPage'
-import SearchPage from '@/pages/SearchPage'
-import TrendsPage from '@/pages/TrendsPage'
 import CommandPalette from '@/components/shell/CommandPalette'
 import MobileNav from '@/components/shell/MobileNav'
 import ThemeToggle from '@/components/shell/ThemeToggle'
 import TopProgressBar from '@/components/shell/TopProgressBar'
-import { IconButton, Kbd } from '@/components/ui'
+import { IconButton, Kbd, Spinner } from '@/components/ui'
 import { useHotkeys } from '@/hooks/useHotkeys'
 
 type NavItem = { to: string; label: string; end?: boolean }
+
+const OverviewPage = lazy(() => import('@/pages/OverviewPage'))
+const TrendsPage = lazy(() => import('@/pages/TrendsPage'))
+const MatchLabPage = lazy(() => import('@/pages/MatchLabPage'))
+const SearchPage = lazy(() => import('@/pages/SearchPage'))
 
 const NAV_ITEMS: ReadonlyArray<NavItem> = [
   { to: '/', label: 'Overview', end: true },
@@ -20,6 +21,14 @@ const NAV_ITEMS: ReadonlyArray<NavItem> = [
   { to: '/match-lab', label: 'Match Lab' },
   { to: '/search', label: 'Search & Similarity' },
 ]
+
+function RouteLoading() {
+  return (
+    <div className="flex min-h-[420px] items-center justify-center">
+      <Spinner size="lg" label="Loading page" className="text-[color:var(--brand)]" />
+    </div>
+  )
+}
 
 export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -129,12 +138,14 @@ export default function App() {
         </header>
 
         <main className="py-8">
-          <Routes>
-            <Route path="/" element={<OverviewPage />} />
-            <Route path="/trends" element={<TrendsPage />} />
-            <Route path="/match-lab" element={<MatchLabPage />} />
-            <Route path="/search" element={<SearchPage />} />
-          </Routes>
+          <Suspense fallback={<RouteLoading />}>
+            <Routes>
+              <Route path="/" element={<OverviewPage />} />
+              <Route path="/trends" element={<TrendsPage />} />
+              <Route path="/match-lab" element={<MatchLabPage />} />
+              <Route path="/search" element={<SearchPage />} />
+            </Routes>
+          </Suspense>
         </main>
       </div>
 

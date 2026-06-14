@@ -958,6 +958,7 @@ export default function MatchLabPage() {
   const inputsReady = inputs.profileText.trim().length >= 20
   const anyPending = matchMutation.isPending || whatIfMutation.isPending
   const whatIfHasAttempted = whatIfMutation.data !== undefined || whatIfMutation.error !== null
+  const profileMatchExtractedSkills = matchMutation.data?.extracted_skills ?? []
 
   const runCurrentMatch = (nextInputs = inputs) => {
     setActiveTab('match')
@@ -1214,8 +1215,8 @@ export default function MatchLabPage() {
                 <div className="mt-4">
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">Extracted skills</p>
                   <div className="mt-2 flex flex-wrap gap-2">
-                    {matchMutation.data?.extracted_skills.length ? (
-                      matchMutation.data.extracted_skills.map((skill) => (
+                    {profileMatchExtractedSkills.length ? (
+                      profileMatchExtractedSkills.map((skill) => (
                         <span key={skill} className="rounded-full bg-[color:var(--surface)] px-3 py-1 text-xs font-medium text-[color:var(--ink-muted)]">
                           {skill}
                         </span>
