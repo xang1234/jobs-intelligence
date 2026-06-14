@@ -565,6 +565,21 @@ class TestMarketIntelligenceEndpoints:
         assert data["total_candidates"] == 24
         mock_engine.match_profile.assert_called_once()
 
+    def test_profile_match_caches_identical_requests(self, client, mock_engine):
+        payload = {
+            "profile_text": "Senior analytics leader with Python and SQL experience across ML platforms.",
+            "target_titles": ["Data Scientist"],
+            "salary_expectation_annual": 180000,
+        }
+
+        first = client.post("/api/match/profile", json=payload)
+        second = client.post("/api/match/profile", json=payload)
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert first.json() == second.json()
+        mock_engine.match_profile.assert_called_once()
+
 
 class TestCareerDeltaEndpoint:
     def test_career_delta_analysis(self, client, mock_engine):
@@ -621,6 +636,36 @@ class TestCareerDeltaEndpoint:
         internal_req = mock_engine._career_delta_engine.analyze.call_args[0][0]
         assert internal_req.profile_text == "Senior data analyst with Python, SQL, and dashboarding experience."
         assert internal_req.limit == 6
+
+    def test_career_delta_analysis_caches_identical_requests(self, client, mock_engine):
+        mock_engine._career_delta_engine = MagicMock()
+        mock_engine._career_delta_engine.analyze.return_value = CareerDeltaResponse(
+            request=MagicMock(location="Singapore"),
+            baseline=BaselineMarketPosition(
+                position=MarketPosition.COMPETITIVE,
+                reachable_jobs=12,
+                total_candidates=30,
+                fit_median=0.61,
+                fit_p90=0.8,
+                salary_band=SalaryBand(min_annual=90000, median_annual=110000, max_annual=140000),
+            ),
+            summaries=(),
+            filtered_scenarios=(),
+            degraded=False,
+            thin_market=False,
+        )
+        payload = {
+            "profile_text": "Senior data analyst with Python, SQL, and dashboarding experience.",
+            "max_scenarios": 6,
+        }
+
+        first = client.post("/api/career-delta", json=payload)
+        second = client.post("/api/career-delta", json=payload)
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert first.json() == second.json()
+        mock_engine._career_delta_engine.analyze.assert_called_once()
 
     def test_career_delta_analysis_surfaces_thin_market_and_degraded_flags(self, client, mock_engine):
         mock_engine._career_delta_engine = MagicMock()

@@ -87,6 +87,8 @@ _search_engine: Optional[SemanticSearchEngine] = None
 # concurrent mutation of TTLCache and other non-thread-safe state.
 # FAISS/numpy still release the GIL, so CPU work parallelizes natively.
 _engine_executor = ThreadPoolExecutor(max_workers=1)
+MATCH_LAB_RESPONSE_CACHE_TTL_SECONDS = 300
+MATCH_LAB_RESPONSE_CACHE_MAX_ENTRIES = 128
 
 
 class _CareerDeltaTaxonomyHelper:
@@ -130,6 +132,26 @@ def _get_career_delta_detail_cache(
     cache = TTLCache(maxsize=max_entries, ttl=ttl_seconds)
     setattr(engine, "_career_delta_detail_cache", cache)
     return cache
+
+
+def _get_match_lab_response_cache(engine: SemanticSearchEngine, name: str) -> TTLCache:
+    """Lazily construct a short-lived response cache for expensive Match Lab calls."""
+    attr = f"_match_lab_{name}_response_cache"
+    cached = getattr(engine, attr, None)
+    if isinstance(cached, TTLCache):
+        return cached
+
+    cache = TTLCache(
+        maxsize=MATCH_LAB_RESPONSE_CACHE_MAX_ENTRIES,
+        ttl=MATCH_LAB_RESPONSE_CACHE_TTL_SECONDS,
+    )
+    setattr(engine, attr, cache)
+    return cache
+
+
+def _request_cache_key(prefix: str, request) -> str:
+    """Build a stable cache key for exact API request replays."""
+    return f"{prefix}:{request.model_dump_json()}"
 
 
 def _filter_detail_summaries(
@@ -694,6 +716,12 @@ def _register_routes(app: FastAPI) -> None:
         engine: SemanticSearchEngine = Depends(get_engine),
     ) -> ProfileMatchResponse:
         """Match a pasted candidate profile or resume text to jobs."""
+        cache = _get_match_lab_response_cache(engine, "profile")
+        cache_key = _request_cache_key("profile", request)
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached.model_copy(deep=True)
+
         loop = asyncio.get_running_loop()
         raw = await loop.run_in_executor(
             None,
@@ -707,13 +735,15 @@ def _register_routes(app: FastAPI) -> None:
                 limit=request.limit,
             ),
         )
-        return ProfileMatchResponse(
+        response = ProfileMatchResponse(
             results=[JobResult.from_internal(item) for item in raw["results"]],
             extracted_skills=raw["extracted_skills"],
             total_candidates=raw["total_candidates"],
             search_time_ms=raw["search_time_ms"],
             degraded=raw["degraded"],
         )
+        cache[cache_key] = response
+        return response
 
     @app.post("/api/career-delta", response_model=CareerDeltaAnalysisResponse)
     async def career_delta_analysis(
@@ -721,6 +751,12 @@ def _register_routes(app: FastAPI) -> None:
         engine: SemanticSearchEngine = Depends(get_engine),
     ) -> CareerDeltaAnalysisResponse:
         """Run career-delta analysis through the serialized backend executor."""
+        cache = _get_match_lab_response_cache(engine, "career_delta")
+        cache_key = _request_cache_key("career_delta", request)
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached.model_copy(deep=True)
+
         loop = asyncio.get_running_loop()
         internal_req = request.to_internal()
         allowed_delta_types = tuple(item.value for item in request.selected_delta_types())
@@ -740,11 +776,13 @@ def _register_routes(app: FastAPI) -> None:
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         elapsed_ms = round((loop.time() - started) * 1000, 3)
-        return CareerDeltaAnalysisResponse.from_internal(
+        response = CareerDeltaAnalysisResponse.from_internal(
             internal_resp,
             allowed_delta_types=request.selected_delta_types(),
             analysis_time_ms=elapsed_ms,
         )
+        cache[cache_key] = response
+        return response
 
     @app.get("/api/career-delta/{scenario_id}/detail", response_model=CareerDeltaScenarioDetail)
     async def career_delta_detail(
