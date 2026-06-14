@@ -2,11 +2,13 @@
 
 ARG SOURCE_REPO=https://github.com/xang1234/jobs-intelligence.git
 ARG SOURCE_REF=master
+ARG SOURCE_VERSION=dev
 
 FROM python:3.11-slim AS builder
 
 ARG SOURCE_REPO
 ARG SOURCE_REF
+ARG SOURCE_VERSION
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc g++ git \
@@ -15,7 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install --no-cache-dir poetry==1.8.5
 
 WORKDIR /build
-RUN git clone --depth 1 --branch "$SOURCE_REF" "$SOURCE_REPO" app
+RUN echo "Building $SOURCE_REPO@$SOURCE_REF ($SOURCE_VERSION)" \
+    && git clone --depth 1 --branch "$SOURCE_REF" "$SOURCE_REPO" app
 
 WORKDIR /build/app
 RUN poetry export -f requirements.txt --without-hashes --without dev --with ml -o requirements.txt

@@ -187,7 +187,11 @@ MCF_CORS_ORIGINS=https://jobs-intelligence.pages.dev,https://jobs.deepgradient.u
 MCF_RATE_LIMIT_RPM=100
 SOURCE_REPO=https://github.com/xang1234/jobs-intelligence.git
 SOURCE_REF=master
+SOURCE_VERSION=<git-sha-or-cache-buster>
 ```
+
+`scripts/deploy_huggingface_space.py` sets `SOURCE_VERSION` from the local git
+revision by default so Docker rebuilds the repo clone layer when the ref moves.
 
 Deploy with:
 
