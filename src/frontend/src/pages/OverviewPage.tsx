@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ArrowDownRightIcon, ArrowUpRightIcon, ChartBarIcon } from '@heroicons/react/20/solid'
 import MetricCard from '@/components/overview/MetricCard'
 import { Card, Chip, EmptyState, Skeleton, SkeletonText } from '@/components/ui'
+import { useIdleEnabled } from '@/hooks/useIdleEnabled'
 import { getOverview, getPopularQueries } from '@/services/api'
 import type { MomentumCard } from '@/types/api'
 
@@ -11,10 +12,12 @@ function formatMoney(value: number | null): string {
 }
 
 export default function OverviewPage() {
+  const showSecondaryData = useIdleEnabled()
   const overview = useQuery({ queryKey: ['overview', 3], queryFn: () => getOverview(3) })
   const popular = useQuery({
     queryKey: ['popularQueries'],
     queryFn: () => getPopularQueries(30, 8),
+    enabled: showSecondaryData,
   })
 
   const data = overview.data
@@ -123,7 +126,7 @@ export default function OverviewPage() {
               Recent search demand
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
-              {popular.isLoading ? (
+              {popular.isLoading || popular.isPending ? (
                 <SkeletonText lines={2} />
               ) : popular.data && popular.data.length > 0 ? (
                 popular.data.map((item) => (

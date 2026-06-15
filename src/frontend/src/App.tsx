@@ -6,20 +6,22 @@ import ThemeToggle from '@/components/shell/ThemeToggle'
 import TopProgressBar from '@/components/shell/TopProgressBar'
 import { IconButton, Kbd, Spinner } from '@/components/ui'
 import { useHotkeys } from '@/hooks/useHotkeys'
+import { scheduleIdleTask } from '@/services/idle'
+import {
+  prefetchRoute,
+  scheduleRouteWarmup,
+} from '@/services/routePrefetch'
+import { ROUTE_LOADERS } from '@/services/routeModules'
 
 type NavItem = { to: string; label: string; end?: boolean }
 
-const loadOverviewPage = () => import('@/pages/OverviewPage')
-const loadTrendsPage = () => import('@/pages/TrendsPage')
-const loadMatchLabPage = () => import('@/pages/MatchLabPage')
-const loadSearchPage = () => import('@/pages/SearchPage')
 const loadCommandPalette = () => import('@/components/shell/CommandPalette')
 const loadMobileNav = () => import('@/components/shell/MobileNav')
 
-const OverviewPage = lazy(loadOverviewPage)
-const TrendsPage = lazy(loadTrendsPage)
-const MatchLabPage = lazy(loadMatchLabPage)
-const SearchPage = lazy(loadSearchPage)
+const OverviewPage = lazy(ROUTE_LOADERS['/pulse'])
+const TrendsPage = lazy(ROUTE_LOADERS['/trends'])
+const MatchLabPage = lazy(ROUTE_LOADERS['/match-lab'])
+const SearchPage = lazy(ROUTE_LOADERS['/'])
 const CommandPalette = lazy(loadCommandPalette)
 const MobileNav = lazy(loadMobileNav)
 const SystemStatus = lazy(() => import('@/components/shell/SystemStatus'))
@@ -30,20 +32,6 @@ const NAV_ITEMS: ReadonlyArray<NavItem> = [
   { to: '/trends', label: 'Trends' },
   { to: '/pulse', label: 'Market pulse' },
 ]
-
-const ROUTE_LOADERS: Record<string, () => Promise<unknown>> = {
-  '/': loadSearchPage,
-  '/match-lab': loadMatchLabPage,
-  '/trends': loadTrendsPage,
-  '/pulse': loadOverviewPage,
-}
-
-const TREND_PREFETCH = {
-  skills: ['Customer Service', 'Microsoft Excel', 'Communication Skills'],
-  role: 'customer service',
-  company: 'DBS BANK LTD.',
-  months: 3,
-} as const
 
 function RouteLoading() {
   return (
@@ -56,6 +44,7 @@ function RouteLoading() {
 export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [systemStatusReady, setSystemStatusReady] = useState(false)
   const location = useLocation()
   const queryClient = useQueryClient()
 
@@ -64,91 +53,11 @@ export default function App() {
       item.end ? location.pathname === item.to : location.pathname.startsWith(item.to),
     ) ?? NAV_ITEMS[0]
 
-  const prefetchRouteModule = useCallback((to: string) => {
-    void ROUTE_LOADERS[to]?.()
-  }, [])
-
-  const prefetchPageData = useCallback(
+  const warmRoute = useCallback(
     (to: string) => {
-      void import('@/services/api').then(
-        ({
-          getCompanyTrend,
-          getHealth,
-          getOverview,
-          getPerformanceStats,
-          getPopularQueries,
-          getRoleTrend,
-          getSkillCloud,
-          getSkillTrends,
-          getStats,
-        }) => {
-          if (to === '/pulse') {
-            void queryClient.prefetchQuery({
-              queryKey: ['overview', 3],
-              queryFn: () => getOverview(3),
-            })
-            void queryClient.prefetchQuery({ queryKey: ['stats'], queryFn: getStats })
-            void queryClient.prefetchQuery({
-              queryKey: ['popularQueries'],
-              queryFn: () => getPopularQueries(30, 8),
-            })
-            void queryClient.prefetchQuery({
-              queryKey: ['performanceStats'],
-              queryFn: () => getPerformanceStats(30),
-            })
-          }
-
-          if (to === '/trends') {
-            void queryClient.prefetchQuery({
-              queryKey: ['overview', TREND_PREFETCH.months],
-              queryFn: () => getOverview(TREND_PREFETCH.months),
-            })
-            void queryClient.prefetchQuery({
-              queryKey: ['skillTrends', TREND_PREFETCH.skills, TREND_PREFETCH.months, '', ''],
-              queryFn: () =>
-                getSkillTrends({
-                  skills: [...TREND_PREFETCH.skills],
-                  months: TREND_PREFETCH.months,
-                  employment_type: null,
-                  region: null,
-                }),
-            })
-            void queryClient.prefetchQuery({
-              queryKey: ['roleTrend', TREND_PREFETCH.role, TREND_PREFETCH.months, '', ''],
-              queryFn: () =>
-                getRoleTrend({
-                  query: TREND_PREFETCH.role,
-                  months: TREND_PREFETCH.months,
-                  employment_type: null,
-                  region: null,
-                }),
-            })
-            void queryClient.prefetchQuery({
-              queryKey: ['companyTrend', TREND_PREFETCH.company, TREND_PREFETCH.months],
-              queryFn: () => getCompanyTrend(TREND_PREFETCH.company, TREND_PREFETCH.months, false),
-            })
-          }
-
-          if (to === '/') {
-            void queryClient.prefetchQuery({
-              queryKey: ['skillCloud'],
-              queryFn: () => getSkillCloud(10, 80),
-              staleTime: 10 * 60 * 1000,
-            })
-            void queryClient.prefetchQuery({ queryKey: ['health'], queryFn: getHealth })
-          }
-        },
-      )
+      prefetchRoute(queryClient, to)
     },
     [queryClient],
-  )
-
-  const prefetchRoute = useCallback(
-    (to: string) => {
-      prefetchRouteModule(to)
-      prefetchPageData(to)
-    },
-    [prefetchPageData, prefetchRouteModule],
   )
 
   const openPalette = useCallback(() => {
@@ -167,35 +76,12 @@ export default function App() {
     return () => mql.removeEventListener('change', close)
   }, [])
 
-  useEffect(() => {
-    const prefetchIdleWork = () => {
-      for (const item of NAV_ITEMS) {
-        prefetchRouteModule(item.to)
-      }
-      prefetchPageData('/')
-      prefetchPageData('/pulse')
-    }
+  useEffect(() => scheduleRouteWarmup(queryClient), [queryClient])
 
-    const idleWindow = window as Window & {
-      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
-      cancelIdleCallback?: (handle: number) => void
-    }
-    if (typeof idleWindow.requestIdleCallback === 'function') {
-      let idleHandle: number | undefined
-      const delayHandle = window.setTimeout(() => {
-        idleHandle = idleWindow.requestIdleCallback?.(prefetchIdleWork, { timeout: 2500 })
-      }, 1500)
-      return () => {
-        window.clearTimeout(delayHandle)
-        if (idleHandle !== undefined) {
-          idleWindow.cancelIdleCallback?.(idleHandle)
-        }
-      }
-    }
-
-    const handle = window.setTimeout(prefetchIdleWork, 1500)
-    return () => window.clearTimeout(handle)
-  }, [prefetchPageData, prefetchRouteModule])
+  useEffect(
+    () => scheduleIdleTask(() => setSystemStatusReady(true), { delayMs: 2_000, timeoutMs: 4_000 }),
+    [],
+  )
 
   useHotkeys({
     'mod+k': (e) => {
@@ -228,9 +114,9 @@ export default function App() {
                     key={item.to}
                     to={item.to}
                     end={item.end}
-                    onPointerEnter={() => prefetchRoute(item.to)}
-                    onMouseEnter={() => prefetchRoute(item.to)}
-                    onFocus={() => prefetchRoute(item.to)}
+                    onPointerEnter={() => warmRoute(item.to)}
+                    onMouseEnter={() => warmRoute(item.to)}
+                    onFocus={() => warmRoute(item.to)}
                     className={({ isActive }) =>
                       `rounded-full px-4 py-2 text-sm font-semibold transition ${
                         isActive
@@ -309,9 +195,11 @@ export default function App() {
           </Suspense>
         </main>
 
-        <Suspense fallback={null}>
-          <SystemStatus />
-        </Suspense>
+        {systemStatusReady ? (
+          <Suspense fallback={null}>
+            <SystemStatus />
+          </Suspense>
+        ) : null}
       </div>
 
       {paletteOpen ? (
@@ -325,7 +213,7 @@ export default function App() {
             open={mobileNavOpen}
             onClose={() => setMobileNavOpen(false)}
             items={NAV_ITEMS}
-            onPrefetch={prefetchRoute}
+            onPrefetch={warmRoute}
           />
         </Suspense>
       ) : null}

@@ -1,5 +1,6 @@
 """Tests for FastAPI application endpoints."""
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Optional
@@ -10,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.app import create_app, get_engine
+from src.api.response_cache import cached_public_response
 from src.mcf.career_delta import (
     BaselineMarketPosition,
     CareerDeltaResponse,
@@ -447,6 +449,27 @@ class TestSkillCloudEndpoint:
         assert second.status_code == 200
         assert first.json() == second.json()
         mock_engine.get_skill_cloud.assert_called_once()
+
+    def test_public_response_cache_coalesces_concurrent_misses(self, mock_engine):
+        calls = 0
+
+        async def producer():
+            nonlocal calls
+            calls += 1
+            await asyncio.sleep(0.01)
+            return {"items": [{"skill": "Python"}]}
+
+        async def run():
+            return await asyncio.gather(
+                cached_public_response(mock_engine, "skill_cloud:test", producer),
+                cached_public_response(mock_engine, "skill_cloud:test", producer),
+            )
+
+        first, second = asyncio.run(run())
+
+        assert calls == 1
+        assert first == second
+        assert first is not second
 
     def test_skill_cloud_with_params(self, client, mock_engine):
         resp = client.get("/api/skills/cloud?min_jobs=100&limit=50")
