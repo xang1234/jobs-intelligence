@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import JobCard from '@/components/JobCard'
 import { toast } from '@/components/ui'
@@ -13,7 +13,12 @@ import {
   type MatchLabTab,
 } from './match-lab/helpers'
 import { StatePanel } from './match-lab/primitives'
-import { WhatIfSummaryPanel } from './match-lab/WhatIfPanel'
+
+const loadWhatIfPanel = () =>
+  import('./match-lab/WhatIfPanel').then(({ WhatIfSummaryPanel }) => ({
+    default: WhatIfSummaryPanel,
+  }))
+const WhatIfSummaryPanel = lazy(loadWhatIfPanel)
 
 export default function MatchLabPage() {
   const [activeTab, setActiveTab] = useState<MatchLabTab>('match')
@@ -290,6 +295,9 @@ export default function MatchLabPage() {
                 <button
                   type="button"
                   onClick={() => setActiveTab('what-if')}
+                  onPointerEnter={() => void loadWhatIfPanel()}
+                  onMouseEnter={() => void loadWhatIfPanel()}
+                  onFocus={() => void loadWhatIfPanel()}
                   className={`rounded-full px-4 py-2 text-sm font-semibold transition ${tabButtonClass(activeTab === 'what-if')}`}
                 >
                   Better moves
@@ -374,20 +382,30 @@ export default function MatchLabPage() {
               ) : null}
 
               {!whatIfMutation.error ? (
-                <WhatIfSummaryPanel
-                  response={whatIfMutation.data}
-                  isPending={whatIfMutation.isPending}
-                  hasAttempted={whatIfHasAttempted}
-                  onRetry={runWhatIf}
-                  expandedScenarioId={expandedScenarioId}
-                  detailByScenarioId={scenarioDetails}
-                  detailErrorByScenarioId={detailErrors}
-                  detailLoadingId={detailLoadingId}
-                  appliedScenarioId={appliedScenario?.scenarioId ?? null}
-                  onToggleDetail={toggleScenarioDetail}
-                  onRetryDetail={retryScenarioDetail}
-                  onApplyScenario={applyScenario}
-                />
+                <Suspense
+                  fallback={
+                    <StatePanel
+                      eyebrow="Loading"
+                      title="Preparing Better moves"
+                      message="The counterfactual results panel is loading."
+                    />
+                  }
+                >
+                  <WhatIfSummaryPanel
+                    response={whatIfMutation.data}
+                    isPending={whatIfMutation.isPending}
+                    hasAttempted={whatIfHasAttempted}
+                    onRetry={runWhatIf}
+                    expandedScenarioId={expandedScenarioId}
+                    detailByScenarioId={scenarioDetails}
+                    detailErrorByScenarioId={detailErrors}
+                    detailLoadingId={detailLoadingId}
+                    appliedScenarioId={appliedScenario?.scenarioId ?? null}
+                    onToggleDetail={toggleScenarioDetail}
+                    onRetryDetail={retryScenarioDetail}
+                    onApplyScenario={applyScenario}
+                  />
+                </Suspense>
               ) : null}
             </>
           )}

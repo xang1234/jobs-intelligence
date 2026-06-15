@@ -11,6 +11,7 @@ import SearchStats from '@/components/SearchStats'
 import SimilarJobsModal from '@/components/SimilarJobsModal'
 import SkillCloud from '@/components/SkillCloud'
 import { Card } from '@/components/ui'
+import { useIdleEnabled } from '@/hooks/useIdleEnabled'
 import { useUrlFilters } from '@/hooks/useUrlFilters'
 import {
   findSimilarCompanies,
@@ -28,6 +29,7 @@ export default function SearchPage() {
   const [similarJobs, setSimilarJobs] = useState<JobResult[] | undefined>()
   const [similarModalOpen, setSimilarModalOpen] = useState(false)
   const [companyResults, setCompanyResults] = useState<CompanySimilarity[] | undefined>()
+  const showSecondaryData = useIdleEnabled()
   const searchBarRef = useRef<SearchBarHandle>(null)
 
   // Keep SearchBar text in sync when query changes via URL/skill clicks.
@@ -54,6 +56,7 @@ export default function SearchPage() {
     queryKey: ['skillCloud'],
     queryFn: () => getSkillCloud(10, 80),
     staleTime: 10 * 60 * 1000,
+    enabled: showSecondaryData,
   })
 
   const relatedSkills = useQuery({

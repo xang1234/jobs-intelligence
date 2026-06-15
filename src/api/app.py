@@ -14,19 +14,17 @@ Usage:
 """
 
 import asyncio
-import copy
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from functools import partial
 from pathlib import Path
-from typing import Awaitable, Callable, Optional, TypeVar
+from typing import Optional
 
 from cachetools import TTLCache
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 
 from ..mcf.career_delta import (
     CareerDeltaDependencies,
@@ -79,6 +77,7 @@ from .models import (
     StatsResponse,
     TrendPoint,
 )
+from .response_cache import cached_public_response
 
 logger = logging.getLogger(__name__)
 
@@ -91,10 +90,6 @@ _search_engine: Optional[SemanticSearchEngine] = None
 _engine_executor = ThreadPoolExecutor(max_workers=1)
 MATCH_LAB_RESPONSE_CACHE_TTL_SECONDS = 300
 MATCH_LAB_RESPONSE_CACHE_MAX_ENTRIES = 128
-PUBLIC_RESPONSE_CACHE_TTL_SECONDS = 300
-PUBLIC_RESPONSE_CACHE_MAX_ENTRIES = 256
-
-T = TypeVar("T")
 
 
 class _CareerDeltaTaxonomyHelper:
@@ -153,42 +148,6 @@ def _get_match_lab_response_cache(engine: SemanticSearchEngine, name: str) -> TT
     )
     setattr(engine, attr, cache)
     return cache
-
-
-def _get_public_response_cache(engine: SemanticSearchEngine) -> TTLCache:
-    """Lazily construct a short-lived cache for expensive read-only API responses."""
-    cached = getattr(engine, "_public_response_cache", None)
-    if isinstance(cached, TTLCache):
-        return cached
-
-    cache = TTLCache(
-        maxsize=PUBLIC_RESPONSE_CACHE_MAX_ENTRIES,
-        ttl=PUBLIC_RESPONSE_CACHE_TTL_SECONDS,
-    )
-    setattr(engine, "_public_response_cache", cache)
-    return cache
-
-
-def _clone_cached_response(value: T) -> T:
-    """Return a defensive copy of a cached Pydantic/list/dict response."""
-    if isinstance(value, BaseModel):
-        return value.model_copy(deep=True)  # type: ignore[return-value]
-    return copy.deepcopy(value)
-
-
-async def _cached_public_response(
-    engine: SemanticSearchEngine,
-    cache_key: str,
-    producer: Callable[[], Awaitable[T]],
-) -> T:
-    cache = _get_public_response_cache(engine)
-    cached = cache.get(cache_key)
-    if cached is not None:
-        return _clone_cached_response(cached)
-
-    response = await producer()
-    cache[cache_key] = _clone_cached_response(response)
-    return response
 
 
 def _request_cache_key(prefix: str, request) -> str:
@@ -620,7 +579,7 @@ def _register_routes(app: FastAPI) -> None:
                 total_unique_skills=raw["total_unique_skills"],
             )
 
-        return await _cached_public_response(
+        return await cached_public_response(
             engine,
             f"skill_cloud:{min_jobs}:{limit}",
             produce,
@@ -662,7 +621,7 @@ def _register_routes(app: FastAPI) -> None:
             internal_results = await loop.run_in_executor(None, engine.find_similar_companies, internal_req)
             return [CompanySimilarity.from_internal(r) for r in internal_results]
 
-        return await _cached_public_response(
+        return await cached_public_response(
             engine,
             _request_cache_key("similar_companies", request),
             produce,
@@ -688,7 +647,7 @@ def _register_routes(app: FastAPI) -> None:
                 market_insights=[InsightCard(**item) for item in raw["market_insights"]],
             )
 
-        return await _cached_public_response(
+        return await cached_public_response(
             engine,
             f"overview:{months}",
             produce,
@@ -723,7 +682,7 @@ def _register_routes(app: FastAPI) -> None:
                 for item in raw
             ]
 
-        return await _cached_public_response(
+        return await cached_public_response(
             engine,
             _request_cache_key("skill_trends", request),
             produce,
@@ -755,7 +714,7 @@ def _register_routes(app: FastAPI) -> None:
                 latest=TrendPoint(**raw["latest"]) if raw.get("latest") else None,
             )
 
-        return await _cached_public_response(
+        return await cached_public_response(
             engine,
             _request_cache_key("role_trends", request),
             produce,
@@ -799,7 +758,7 @@ def _register_routes(app: FastAPI) -> None:
                 similar_companies=[CompanySimilarity.from_internal(item) for item in similar_raw],
             )
 
-        return await _cached_public_response(
+        return await cached_public_response(
             engine,
             f"company_trends:{company_name.lower()}:{months}:{include_similar}",
             produce,
@@ -923,7 +882,7 @@ def _register_routes(app: FastAPI) -> None:
                 model_version=raw.get("model_version", "unknown"),
             )
 
-        return await _cached_public_response(
+        return await cached_public_response(
             engine,
             "stats",
             produce,
@@ -941,7 +900,7 @@ def _register_routes(app: FastAPI) -> None:
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(None, partial(engine.db.get_popular_queries, days=days, limit=limit))
 
-        return await _cached_public_response(
+        return await cached_public_response(
             engine,
             f"popular_queries:{days}:{limit}",
             produce,
@@ -958,7 +917,7 @@ def _register_routes(app: FastAPI) -> None:
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(None, partial(engine.db.get_search_latency_percentiles, days=days))
 
-        return await _cached_public_response(
+        return await cached_public_response(
             engine,
             f"performance_stats:{days}",
             produce,
