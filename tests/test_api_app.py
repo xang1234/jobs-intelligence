@@ -471,6 +471,39 @@ class TestSkillCloudEndpoint:
         assert first == second
         assert first is not second
 
+    def test_public_response_cache_shields_shared_fill_from_caller_cancellation(self, mock_engine):
+        calls = 0
+
+        async def run():
+            nonlocal calls
+            started = asyncio.Event()
+            release = asyncio.Event()
+
+            async def producer():
+                nonlocal calls
+                calls += 1
+                started.set()
+                await release.wait()
+                return {"items": [{"skill": "Python"}]}
+
+            first = asyncio.create_task(cached_public_response(mock_engine, "skill_cloud:cancel", producer))
+            await started.wait()
+            first.cancel()
+            try:
+                await first
+            except asyncio.CancelledError:
+                pass
+
+            second = asyncio.create_task(cached_public_response(mock_engine, "skill_cloud:cancel", producer))
+            await asyncio.sleep(0)
+            release.set()
+            return await second
+
+        result = asyncio.run(run())
+
+        assert calls == 1
+        assert result == {"items": [{"skill": "Python"}]}
+
     def test_skill_cloud_with_params(self, client, mock_engine):
         resp = client.get("/api/skills/cloud?min_jobs=100&limit=50")
         assert resp.status_code == 200

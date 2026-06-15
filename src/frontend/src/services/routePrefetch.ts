@@ -12,12 +12,17 @@ const TREND_PREFETCH = {
 let apiModulePromise: Promise<typeof import('@/services/api')> | null = null
 
 function loadApiModule() {
-  apiModulePromise ??= import('@/services/api')
+  apiModulePromise ??= import('@/services/api').catch((error) => {
+    apiModulePromise = null
+    throw error
+  })
   return apiModulePromise
 }
 
 export function prefetchRouteModule(to: string): void {
-  void loadRouteModule(to)
+  void loadRouteModule(to)?.catch(() => {
+    // Warmup is speculative; route render will surface real module failures.
+  })
 }
 
 export function prefetchRouteData(queryClient: QueryClient, to: string): void {
@@ -89,7 +94,9 @@ export function prefetchRouteData(queryClient: QueryClient, to: string): void {
         void queryClient.prefetchQuery({ queryKey: ['health'], queryFn: getHealth })
       }
     },
-  )
+  ).catch(() => {
+    // Warmup is speculative; page queries will surface real API module failures.
+  })
 }
 
 export function prefetchRoute(queryClient: QueryClient, to: string): void {
