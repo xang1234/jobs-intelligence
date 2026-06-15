@@ -88,23 +88,49 @@ export default function SearchPage() {
   }
 
   return (
-    <div className="space-y-8">
-      <Card as="section" radius="2xl" className="p-8">
-        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[color:var(--ink-subtle)]">
-          Search and similarity
-        </p>
-        <h1 className="mt-2 text-4xl font-semibold tracking-tight text-[color:var(--ink)]">
-          Hybrid retrieval with visible query expansion, skill neighborhoods, and match evidence.
+    <div className="space-y-6">
+      <Card as="section" radius="2xl" className="p-6 sm:p-7">
+        <h1 className="text-2xl font-semibold tracking-tight text-[color:var(--ink)] sm:text-3xl">
+          Find your next role
         </h1>
-        <p className="mt-3 max-w-3xl text-base leading-7 text-[color:var(--ink-muted)]">
-          This page keeps the technical NLP showcase intact while exposing the underlying
-          semantic ranking and related-skill graph that drive the results.
+        <p className="mt-1.5 max-w-2xl text-sm leading-6 text-[color:var(--ink-muted)]">
+          Search across Singapore job listings — type a role in plain words and we expand your
+          query and surface related skills automatically. No exact keywords needed.
         </p>
+        <div className="mt-4">
+          <SearchBar
+            ref={searchBarRef}
+            onSearch={setQuery}
+            isLoading={searchResult.isFetching}
+            defaultValue={query}
+            placeholder="Try: machine learning engineer, registered nurse, product manager…"
+          />
+        </div>
+        <div className="mt-3">
+          <ActiveFiltersBar
+            query={query}
+            filters={filters}
+            onClearQuery={() => setQuery('')}
+            onRemoveFilter={(key) => removeKey(key)}
+            onClearAll={clearAll}
+          />
+        </div>
       </Card>
 
       <DegradedBanner show={health.data?.degraded ?? false} />
 
-      <section className="grid gap-6 xl:grid-cols-[0.75fr_1.25fr]">
+      <section className="grid gap-6 xl:grid-cols-[1.3fr_0.7fr]">
+        <main className="space-y-6">
+          {searchResult.data && <SearchStats data={searchResult.data} />}
+
+          <JobList
+            jobs={searchResult.data?.results}
+            isLoading={searchResult.isFetching}
+            hasSearched={query.length > 0}
+            onFindSimilar={(uuid) => similarMutation.mutate(uuid)}
+          />
+        </main>
+
         <aside className="space-y-6">
           <Card radius="xl" className="p-5">
             <FilterPanel filters={filters} onChange={setFilters} />
@@ -126,34 +152,6 @@ export default function SearchPage() {
             />
           </Card>
         </aside>
-
-        <main className="space-y-6">
-          <Card radius="xl" className="p-5">
-            <SearchBar
-              ref={searchBarRef}
-              onSearch={setQuery}
-              isLoading={searchResult.isFetching}
-              defaultValue={query}
-            />
-          </Card>
-
-          <ActiveFiltersBar
-            query={query}
-            filters={filters}
-            onClearQuery={() => setQuery('')}
-            onRemoveFilter={(key) => removeKey(key)}
-            onClearAll={clearAll}
-          />
-
-          {searchResult.data && <SearchStats data={searchResult.data} />}
-
-          <JobList
-            jobs={searchResult.data?.results}
-            isLoading={searchResult.isFetching}
-            hasSearched={query.length > 0}
-            onFindSimilar={(uuid) => similarMutation.mutate(uuid)}
-          />
-        </main>
       </section>
 
       <SimilarJobsModal

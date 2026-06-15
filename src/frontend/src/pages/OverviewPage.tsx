@@ -2,12 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ArrowDownRightIcon, ArrowUpRightIcon, ChartBarIcon } from '@heroicons/react/20/solid'
 import MetricCard from '@/components/overview/MetricCard'
 import { Card, Chip, EmptyState, Skeleton, SkeletonText } from '@/components/ui'
-import {
-  getOverview,
-  getPerformanceStats,
-  getPopularQueries,
-  getStats,
-} from '@/services/api'
+import { getOverview, getPopularQueries } from '@/services/api'
 import type { MomentumCard } from '@/types/api'
 
 function formatMoney(value: number | null): string {
@@ -17,14 +12,9 @@ function formatMoney(value: number | null): string {
 
 export default function OverviewPage() {
   const overview = useQuery({ queryKey: ['overview', 3], queryFn: () => getOverview(3) })
-  const stats = useQuery({ queryKey: ['stats'], queryFn: getStats })
   const popular = useQuery({
     queryKey: ['popularQueries'],
     queryFn: () => getPopularQueries(30, 8),
-  })
-  const performance = useQuery({
-    queryKey: ['performanceStats'],
-    queryFn: () => getPerformanceStats(30),
   })
 
   const data = overview.data
@@ -36,58 +26,21 @@ export default function OverviewPage() {
         as="section"
         radius="2xl"
         elevation={2}
-        className="grid gap-6 p-8 lg:grid-cols-[1.35fr_0.65fr]"
+        className="p-8"
         style={{
           background:
             'linear-gradient(135deg, color-mix(in srgb, var(--color-accent-100) 70%, var(--surface-1-alpha)), color-mix(in srgb, var(--color-brand-100) 50%, var(--surface-1-alpha)))',
         }}
       >
-        <div className="space-y-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[color:var(--ink-muted)]">
-            Singapore hiring-market intelligence
-          </p>
-          <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-[color:var(--ink)] sm:text-5xl">
-            Track demand shifts, salary movement, and the skill graph behind the market.
-          </h1>
-          <p className="max-w-2xl text-base leading-7 text-[color:var(--ink-muted)]">
-            This platform surfaces recruiter-grade job-market signals on top of hybrid search,
-            embeddings, related-skill neighborhoods, and profile-to-role matching.
-          </p>
-        </div>
-
-        <Card radius="xl" elevation={0} className="p-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--ink-subtle)]">
-            Retrieval stack health
-          </p>
-          <dl className="mt-4 grid gap-4 text-sm text-[color:var(--ink-muted)]">
-            <StackRow
-              label="Jobs indexed"
-              value={stats.data?.total_jobs.toLocaleString()}
-              loading={stats.isLoading}
-            />
-            <StackRow
-              label="Embedding coverage"
-              value={
-                stats.data
-                  ? `${stats.data.embedding_coverage_pct.toFixed(1)}%`
-                  : undefined
-              }
-              loading={stats.isLoading}
-            />
-            <StackRow
-              label="Median latency p95"
-              value={
-                performance.data ? `${performance.data.p95_ms.toFixed(0)}ms` : undefined
-              }
-              loading={performance.isLoading}
-            />
-            <StackRow
-              label="Model"
-              value={stats.data?.model_version}
-              loading={stats.isLoading}
-            />
-          </dl>
-        </Card>
+        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[color:var(--ink-muted)]">
+          Singapore hiring market · last 90 days
+        </p>
+        <h1 className="mt-3 max-w-3xl text-4xl font-semibold tracking-tight text-[color:var(--ink)] sm:text-5xl">
+          What's hiring, what it pays, and what changed.
+        </h1>
+        <p className="mt-3 max-w-2xl text-base leading-7 text-[color:var(--ink-muted)]">
+          A quick read on demand, salaries, and the companies and skills moving fastest right now.
+        </p>
       </Card>
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -212,25 +165,6 @@ export default function OverviewPage() {
               />
             )}
       </section>
-    </div>
-  )
-}
-
-function StackRow({
-  label,
-  value,
-  loading,
-}: {
-  label: string
-  value: string | undefined
-  loading: boolean
-}) {
-  return (
-    <div className="flex items-center justify-between">
-      <dt>{label}</dt>
-      <dd className="font-semibold text-[color:var(--ink)]">
-        {loading || value == null ? <Skeleton height={16} width={80} /> : value}
-      </dd>
     </div>
   )
 }
