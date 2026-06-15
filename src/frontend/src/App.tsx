@@ -22,19 +22,20 @@ const MatchLabPage = lazy(loadMatchLabPage)
 const SearchPage = lazy(loadSearchPage)
 const CommandPalette = lazy(loadCommandPalette)
 const MobileNav = lazy(loadMobileNav)
+const SystemStatus = lazy(() => import('@/components/shell/SystemStatus'))
 
 const NAV_ITEMS: ReadonlyArray<NavItem> = [
-  { to: '/', label: 'Overview', end: true },
-  { to: '/trends', label: 'Trends Explorer' },
-  { to: '/match-lab', label: 'Match Lab' },
-  { to: '/search', label: 'Search & Similarity' },
+  { to: '/', label: 'Find jobs', end: true },
+  { to: '/match-lab', label: 'Match my CV' },
+  { to: '/trends', label: 'Trends' },
+  { to: '/pulse', label: 'Market pulse' },
 ]
 
 const ROUTE_LOADERS: Record<string, () => Promise<unknown>> = {
-  '/': loadOverviewPage,
-  '/trends': loadTrendsPage,
+  '/': loadSearchPage,
   '/match-lab': loadMatchLabPage,
-  '/search': loadSearchPage,
+  '/trends': loadTrendsPage,
+  '/pulse': loadOverviewPage,
 }
 
 const TREND_PREFETCH = {
@@ -81,7 +82,7 @@ export default function App() {
           getSkillTrends,
           getStats,
         }) => {
-          if (to === '/') {
+          if (to === '/pulse') {
             void queryClient.prefetchQuery({
               queryKey: ['overview', 3],
               queryFn: () => getOverview(3),
@@ -128,7 +129,7 @@ export default function App() {
             })
           }
 
-          if (to === '/search') {
+          if (to === '/') {
             void queryClient.prefetchQuery({
               queryKey: ['skillCloud'],
               queryFn: () => getSkillCloud(10, 80),
@@ -172,7 +173,7 @@ export default function App() {
         prefetchRouteModule(item.to)
       }
       prefetchPageData('/')
-      prefetchPageData('/search')
+      prefetchPageData('/pulse')
     }
 
     const idleWindow = window as Window & {
@@ -216,7 +217,7 @@ export default function App() {
                 MCF Intelligence
               </p>
               <h1 className="mt-2 text-2xl font-semibold tracking-tight text-[color:var(--ink)]">
-                Hiring-market intelligence and explainable NLP retrieval
+                Find roles that fit you — and see where Singapore is hiring
               </h1>
             </div>
 
@@ -298,13 +299,19 @@ export default function App() {
         <main className="py-8">
           <Suspense fallback={<RouteLoading />}>
             <Routes>
-              <Route path="/" element={<OverviewPage />} />
-              <Route path="/trends" element={<TrendsPage />} />
+              <Route path="/" element={<SearchPage />} />
               <Route path="/match-lab" element={<MatchLabPage />} />
+              <Route path="/trends" element={<TrendsPage />} />
+              <Route path="/pulse" element={<OverviewPage />} />
+              {/* back-compat alias for the old Search route */}
               <Route path="/search" element={<SearchPage />} />
             </Routes>
           </Suspense>
         </main>
+
+        <Suspense fallback={null}>
+          <SystemStatus />
+        </Suspense>
       </div>
 
       {paletteOpen ? (

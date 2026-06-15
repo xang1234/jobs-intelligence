@@ -53,36 +53,36 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
   const actions: Action[] = useMemo(
     () => [
       {
-        id: 'nav-overview',
-        label: 'Go to Overview',
-        hint: 'Home dashboard',
-        keywords: 'home dashboard market',
-        icon: <HomeIcon />,
+        id: 'nav-search',
+        label: 'Go to Find jobs',
+        hint: 'Search Singapore jobs',
+        keywords: 'search find jobs roles retrieval',
+        icon: <Squares2X2Icon />,
         run: () => go('/'),
       },
       {
-        id: 'nav-trends',
-        label: 'Go to Trends Explorer',
-        hint: 'Skills, roles, companies over time',
-        keywords: 'trends charts time series',
-        icon: <ChartBarIcon />,
-        run: () => go('/trends'),
-      },
-      {
         id: 'nav-matchlab',
-        label: 'Go to Match Lab',
-        hint: 'Profile-to-role matching & what-ifs',
-        keywords: 'match scenario what if career',
+        label: 'Go to Match my CV',
+        hint: 'See your matches & best next move',
+        keywords: 'match cv resume profile what if career move',
         icon: <BeakerIcon />,
         run: () => go('/match-lab'),
       },
       {
-        id: 'nav-search',
-        label: 'Go to Search & Similarity',
-        hint: 'Hybrid retrieval',
-        keywords: 'search jobs retrieval',
-        icon: <Squares2X2Icon />,
-        run: () => go('/search'),
+        id: 'nav-trends',
+        label: 'Go to Trends',
+        hint: 'Skills, roles & companies over time',
+        keywords: 'trends charts time series demand',
+        icon: <ChartBarIcon />,
+        run: () => go('/trends'),
+      },
+      {
+        id: 'nav-overview',
+        label: 'Go to Market pulse',
+        hint: 'Hiring, salaries & what changed',
+        keywords: 'overview home dashboard market pulse salary',
+        icon: <HomeIcon />,
+        run: () => go('/pulse'),
       },
       {
         id: 'theme-toggle',
@@ -111,9 +111,9 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
     ? {
         id: 'virtual-search',
         label: `Search jobs: "${trimmed}"`,
-        hint: 'Jump to Search & Similarity',
+        hint: 'Jump to Find jobs',
         icon: <MagnifyingGlassIcon />,
-        run: () => go(`/search?q=${encodeURIComponent(trimmed)}`),
+        run: () => go(`/?q=${encodeURIComponent(trimmed)}`),
       }
     : null
 

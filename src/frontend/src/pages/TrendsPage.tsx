@@ -30,7 +30,7 @@ function latestPoint(points: TrendPoint[]): TrendPoint | null {
 
 function trendSummary(label: string, latest: TrendPoint | null, points: TrendPoint[]): string {
   if (!latest || latest.job_count === 0) {
-    return `No matching postings for ${label} in the hosted window. Try a broader keyword or remove filters.`
+    return `No matching postings for ${label} in the last few months. Try a broader keyword or remove filters.`
   }
   const month = formatMonth(latest.month)
   const signal = getMomentumSignal(latest)
@@ -104,9 +104,9 @@ function SkillSignalCard({ series }: { series: SkillTrendSeries }) {
           detail={formatMonth(latest?.month)}
         />
         <SignalMetric
-          label="Evidence"
+          label="Months active"
           value={`${activeMonths(series.series)}/${series.series.length}`}
-          detail="active months"
+          detail="months active"
         />
       </div>
       <div className="mt-4">
@@ -197,13 +197,13 @@ export default function TrendsPage() {
               Decide what to emphasize in your CV and search.
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-[color:var(--ink-muted)]">
-              The hosted Neon dataset is intentionally capped to the latest three-month window. Signals marked as new
-              show current demand without pretending there is a long historical baseline.
+              These charts cover the last three months of postings. When there isn't enough history to call a real
+              trend, we show current demand instead of a misleading growth number.
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-3">
             <Select<number>
-              label="Hosted window"
+              label="Time window"
               value={months}
               onChange={(v) => setMonths(v ?? 3)}
               options={MONTHS_OPTIONS}
@@ -236,9 +236,9 @@ export default function TrendsPage() {
             detail="annualized midpoint"
           />
           <SignalMetric
-            label="Interpretation"
+            label="How to read this"
             value="Demand first"
-            detail="growth only when baseline exists"
+            detail="growth shown only with enough history"
           />
         </div>
       </Card>
@@ -246,9 +246,9 @@ export default function TrendsPage() {
       <section className="grid items-start gap-6 xl:grid-cols-2">
         <Card as="article" radius="xl" className="p-6">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">
-            Skill evidence
+            Skills in demand
           </p>
-          <h2 className="mt-2 text-2xl font-semibold text-[color:var(--ink)]">What should your CV surface?</h2>
+          <h2 className="mt-2 text-2xl font-semibold text-[color:var(--ink)]">Which skills should your CV lead with?</h2>
           <div className="mt-4">
             <Input
               value={skillInput}
@@ -276,9 +276,9 @@ export default function TrendsPage() {
 
         <Card as="article" radius="xl" className="p-6">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">
-            Role evidence
+            Is this role hiring?
           </p>
-          <h2 className="mt-2 text-2xl font-semibold text-[color:var(--ink)]">Is this search target active?</h2>
+          <h2 className="mt-2 text-2xl font-semibold text-[color:var(--ink)]">Is this role still hiring?</h2>
           <div className="mt-4">
             <Input
               value={roleInput}
@@ -310,7 +310,7 @@ export default function TrendsPage() {
               <div className="mt-4 grid gap-3 sm:grid-cols-3">
                 <SignalMetric label="Current jobs" value={(roleLatest?.job_count ?? 0).toLocaleString()} />
                 <SignalMetric label="Market share" value={`${(roleLatest?.market_share ?? 0).toFixed(2)}%`} />
-                <SignalMetric label="Evidence" value={`${activeMonths(roleTrend.data.series)}/${roleTrend.data.series.length}`} detail="active months" />
+                <SignalMetric label="Months active" value={`${activeMonths(roleTrend.data.series)}/${roleTrend.data.series.length}`} detail="months active" />
               </div>
               <div className="mt-4">
                 <TrendSparkline points={roleTrend.data.series} ariaLabel={`${roleTrend.data.query} postings over time`} />
@@ -326,9 +326,9 @@ export default function TrendsPage() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-subtle)]">
-              Employer evidence
+              Who's hiring
             </p>
-            <h2 className="mt-2 text-2xl font-semibold text-[color:var(--ink)]">Who is hiring in this slice?</h2>
+            <h2 className="mt-2 text-2xl font-semibold text-[color:var(--ink)]">Who is hiring right now?</h2>
           </div>
           <div className="lg:w-96">
             <Input
@@ -368,7 +368,7 @@ export default function TrendsPage() {
               <div className="mt-4 grid gap-3 sm:grid-cols-3">
                 <SignalMetric label="Current jobs" value={(companyLatest?.job_count ?? 0).toLocaleString()} />
                 <SignalMetric label="Market share" value={`${(companyLatest?.market_share ?? 0).toFixed(2)}%`} />
-                <SignalMetric label="Evidence" value={`${companyActiveMonths}/${companyTrend.data.series.length}`} detail="active months" />
+                <SignalMetric label="Months active" value={`${companyActiveMonths}/${companyTrend.data.series.length}`} detail="months active" />
               </div>
               <div className="mt-4">
                 <TrendSparkline

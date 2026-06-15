@@ -286,12 +286,15 @@ test('renders what-if summary recommendations and trust cues', async () => {
       })
     },
     async (page) => {
-      await page.getByRole('button', { name: 'Run What If' }).click()
+      await page.getByRole('button', { name: 'Suggest better moves' }).click()
 
       await page.getByText('Shift into platform-focused ML roles').waitFor()
       await page.getByText('There is not much reliable market evidence for this profile').waitFor()
       await page.getByText('The engine returned a partial recommendation set').waitFor()
-      await page.getByText('Rejected moves the engine considered').waitFor()
+      // Rejected scenarios now live behind a collapsed disclosure; assert the cue, then expand.
+      await page.getByText('Why were some moves ruled out?').waitFor()
+      await page.locator('summary', { hasText: 'Why were some moves ruled out?' }).click()
+      await page.getByText('Moves we considered but ruled out').waitFor()
       await page.getByText('Platform ML roles show better salary and stronger demand than your current baseline.').waitFor()
     },
   )
@@ -319,12 +322,12 @@ test('loads scenario detail only when expanded', async () => {
       })
     },
     async (page) => {
-      await page.getByRole('button', { name: 'Run What If' }).click()
+      await page.getByRole('button', { name: 'Suggest better moves' }).click()
       await page.getByText('Shift into platform-focused ML roles').waitFor()
 
       assert.equal(detailRequests, 0)
 
-      await page.getByRole('button', { name: 'Inspect detail' }).click()
+      await page.getByRole('button', { name: 'See the full picture' }).click()
 
       await page.getByText('Counterfactual angle').waitFor()
       await page.getByText(baseDetailResponse.narrative).waitFor()
@@ -367,16 +370,16 @@ test('applying a scenario updates visible inputs and reruns profile matching', a
     async (page) => {
       const targetTitlesInput = page.getByLabel('Target titles')
       const originalTargetTitles = await targetTitlesInput.inputValue()
-      const originalProfileText = await page.getByLabel('Candidate profile or resume text').inputValue()
+      const originalProfileText = await page.getByLabel('Your CV or profile text').inputValue()
 
-      await page.getByRole('button', { name: 'Run What If' }).click()
+      await page.getByRole('button', { name: 'Suggest better moves' }).click()
       await page.getByText('Shift into platform-focused ML roles').waitFor()
 
-      await page.getByRole('button', { name: 'Inspect detail' }).click()
+      await page.getByRole('button', { name: 'See the full picture' }).click()
       await page.getByText(baseDetailResponse.narrative).waitFor()
-      await page.getByRole('button', { name: 'Apply this scenario' }).click()
+      await page.getByRole('button', { name: 'Use this move' }).click()
 
-      await page.getByText('Candidates scanned:').waitFor()
+      await page.getByText('Jobs considered:').waitFor()
       assert.equal(await targetTitlesInput.inputValue(), 'Platform Machine Learning Engineer')
 
       assert.equal(matchRequests.length, 1)
