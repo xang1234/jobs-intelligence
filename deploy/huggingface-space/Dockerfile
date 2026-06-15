@@ -31,7 +31,14 @@ RUN pip install --no-cache-dir -r requirements-onnx-export.txt
 
 ENV HF_HOME=/tmp/huggingface
 
-RUN python -m src.cli embed-export-onnx all-MiniLM-L6-v2 --output-dir /opt/mcf/models/all-MiniLM-L6-v2-onnx --overwrite
+# Optional HF auth (read token) to avoid anonymous-download rate limits (HTTP 429).
+# Passed as a BuildKit secret; never written to a layer, and this stage is discarded.
+# Without a token the build still works anonymously. On HF Spaces, add an `HF_TOKEN`
+# build secret in the Space settings to enable it.
+RUN --mount=type=secret,id=hf_token,required=false \
+    sh -c 'token="$(cat /run/secrets/hf_token 2>/dev/null || true)"; \
+           if [ -n "$token" ]; then export HF_TOKEN="$token" HUGGING_FACE_HUB_TOKEN="$token"; fi; \
+           python -m src.cli embed-export-onnx all-MiniLM-L6-v2 --output-dir /opt/mcf/models/all-MiniLM-L6-v2-onnx --overwrite'
 
 FROM python:3.11-slim AS runtime
 

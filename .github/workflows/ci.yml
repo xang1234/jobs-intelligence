@@ -95,6 +95,10 @@ jobs:
 
       - name: Run Docker ONNX smoke test
         run: bash scripts/run_docker_onnx_smoke.sh
+        env:
+          # Optional: a HF read token lifts the anonymous model-download rate limit
+          # (HTTP 429) during the image build. Unset (e.g. on forks) → anonymous build.
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
 
   frontend:
     name: Frontend
