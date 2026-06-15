@@ -27,7 +27,13 @@ echo "Using smoke directory: $SMOKE_DIR"
 mkdir -p "$SMOKE_DIR"/embeddings
 rm -f "$SMOKE_DIR"/health.json "$SMOKE_DIR"/search.json
 
-docker build -f docker/backend.Dockerfile -t "$IMAGE_TAG" .
+# BuildKit is required for the --mount=type=secret used to pass an optional HF token.
+export DOCKER_BUILDKIT=1
+build_args=(-f docker/backend.Dockerfile -t "$IMAGE_TAG")
+if [ -n "${HF_TOKEN:-}" ]; then
+    build_args+=(--secret "id=hf_token,env=HF_TOKEN")
+fi
+docker build "${build_args[@]}" .
 docker run --rm \
     "${DOCKER_RUN_USER[@]}" \
     -e PYTHONDONTWRITEBYTECODE=1 \

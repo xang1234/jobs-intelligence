@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 # ── Stage 1: Build ────────────────────────────────────────────────────────────
 # Install compilers + build deps, export requirements, pip install everything.
 # This stage is discarded — only site-packages are carried forward.
@@ -37,7 +39,15 @@ COPY src/ ./src/
 
 ENV HF_HOME=/tmp/huggingface
 
-RUN python -m src.cli embed-export-onnx all-MiniLM-L6-v2 --output-dir /opt/mcf/models/all-MiniLM-L6-v2-onnx --overwrite
+# Optional HF auth. An anonymous download of all-MiniLM-L6-v2 gets rate-limited
+# (HTTP 429) from shared CI/runner IPs; a read token lifts the limit. Passed as a
+# BuildKit secret so it never lands in a layer — and this export stage is discarded
+# anyway (only the ONNX artifact is copied forward). Builds without a token still
+# work (anonymous), they're just subject to the public rate limit.
+RUN --mount=type=secret,id=hf_token,required=false \
+    sh -c 'token="$(cat /run/secrets/hf_token 2>/dev/null || true)"; \
+           if [ -n "$token" ]; then export HF_TOKEN="$token" HUGGING_FACE_HUB_TOKEN="$token"; fi; \
+           python -m src.cli embed-export-onnx all-MiniLM-L6-v2 --output-dir /opt/mcf/models/all-MiniLM-L6-v2-onnx --overwrite'
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
 # Clean slim image with only the installed packages + application source.
