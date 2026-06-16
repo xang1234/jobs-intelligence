@@ -157,6 +157,42 @@ This is a scheduled batch refresh, not a daemon:
 - hosted scrape state can resume between workflow runs
 - the current year and retention cutoff are computed dynamically
 
+### Manual Hosted Deploy
+
+Use [hosted-deploy.yml](../.github/workflows/hosted-deploy.yml) when you want
+to deploy the repository default branch to both Neon and the Hugging Face Space
+from the GitHub Actions UI. It is intentionally manual-only and does not run on
+merge.
+
+Required GitHub Actions secrets:
+
+```text
+NEON_DATABASE_URL
+HF_TOKEN
+```
+
+Optional GitHub Actions variables:
+
+```text
+HF_SPACE_REPO_ID=xang1234/jobs-intelligence-api
+HF_SOURCE_REPO=https://github.com/xang1234/jobs-intelligence.git
+HF_CORS_ORIGINS=https://jobs-intelligence.pages.dev,https://jobs.deepgradient.uk,https://deepgradient.uk,http://localhost:3000
+```
+
+Run it from GitHub:
+
+1. Open **Actions**.
+2. Select **Manual Hosted Deploy**.
+3. Choose the repository default branch in the workflow branch selector
+   (`master` in this repo).
+4. Click **Run workflow**.
+
+The manual workflow can refresh/purge Neon first, then deploy the Hugging Face
+Space with `SOURCE_REF=<selected default branch>` and
+`SOURCE_VERSION=<workflow commit SHA>`. The Space build checks out
+`SOURCE_VERSION`, so a long Neon refresh cannot accidentally publish a newer
+branch head.
+
 ## 5. API Hosting Option A: Hugging Face Spaces
 
 Use Hugging Face Spaces when Oracle Free Tier capacity is unavailable, when you
@@ -168,8 +204,10 @@ This repo includes a Docker Space payload:
 - [deploy/huggingface-space/README.md](../deploy/huggingface-space/README.md)
 - [scripts/deploy_huggingface_space.py](../scripts/deploy_huggingface_space.py)
 
-The Space builds a Docker image, clones this repo at `SOURCE_REF`, exports the
-ONNX model bundle during build, and runs FastAPI on `${PORT:-8000}`.
+The Space builds a Docker image, checks out this repo at `SOURCE_VERSION` when
+it is set, exports the ONNX model bundle during build, and runs FastAPI on
+`${PORT:-8000}`. `SOURCE_REF` remains the branch/ref context and is used as a
+fallback when `SOURCE_VERSION` is unset or `dev`.
 
 Required Hugging Face Space secret:
 
@@ -187,11 +225,12 @@ MCF_CORS_ORIGINS=https://jobs-intelligence.pages.dev,https://jobs.deepgradient.u
 MCF_RATE_LIMIT_RPM=100
 SOURCE_REPO=https://github.com/xang1234/jobs-intelligence.git
 SOURCE_REF=master
-SOURCE_VERSION=<git-sha-or-cache-buster>
+SOURCE_VERSION=<git-sha-to-check-out>
 ```
 
 `scripts/deploy_huggingface_space.py` sets `SOURCE_VERSION` from the local git
-revision by default so Docker rebuilds the repo clone layer when the ref moves.
+revision by default so Docker checks out the exact source revision during the
+Space build.
 
 Deploy with:
 

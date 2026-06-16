@@ -49,7 +49,7 @@ def require_env(name: str) -> str:
 
 
 def resolve_source_version(root: Path, source_ref: str) -> str:
-    """Resolve a local git ref for Docker cache busting."""
+    """Resolve a local git ref for the Space build checkout."""
     try:
         return subprocess.check_output(
             ["git", "rev-parse", "--verify", source_ref],
@@ -70,7 +70,7 @@ def main() -> None:
     parser.add_argument(
         "--source-version",
         default=None,
-        help="Cache-busting source version passed to the Docker build. Defaults to the local git revision.",
+        help="Source revision checked out during the Docker build. Defaults to the local git revision.",
     )
     parser.add_argument("--cors-origins", default=DEFAULT_CORS_ORIGINS, help="Comma-separated CORS origins")
     args = parser.parse_args()

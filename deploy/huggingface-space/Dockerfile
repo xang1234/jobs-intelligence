@@ -17,8 +17,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install --no-cache-dir poetry==1.8.5
 
 WORKDIR /build
-RUN echo "Building $SOURCE_REPO@$SOURCE_REF ($SOURCE_VERSION)" \
-    && git clone --depth 1 --branch "$SOURCE_REF" "$SOURCE_REPO" app
+RUN set -eux; \
+    checkout_ref="$SOURCE_VERSION"; \
+    if [ -z "$checkout_ref" ] || [ "$checkout_ref" = "dev" ]; then checkout_ref="$SOURCE_REF"; fi; \
+    echo "Building $SOURCE_REPO@$SOURCE_REF ($SOURCE_VERSION; checkout $checkout_ref)"; \
+    git clone --filter=blob:none --branch "$SOURCE_REF" "$SOURCE_REPO" app; \
+    cd app; \
+    git checkout --detach "$checkout_ref"
 
 WORKDIR /build/app
 RUN poetry export -f requirements.txt --without-hashes --without dev --with ml -o requirements.txt

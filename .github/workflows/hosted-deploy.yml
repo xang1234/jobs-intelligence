@@ -1,0 +1,316 @@
+name: Manual Hosted Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      refresh_neon:
+        description: "Refresh/purge Neon before deploying Hugging Face"
+        required: true
+        type: boolean
+        default: true
+      scrape_year:
+        description: "MCF scrape year; leave blank for the current year"
+        required: false
+        type: string
+        default: ""
+      max_age_days:
+        description: "Hosted Neon retention window in days"
+        required: true
+        type: string
+        default: "90"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: manual-hosted-deploy
+  cancel-in-progress: false
+
+env:
+  ONNX_MODEL_DIR: data/models/all-MiniLM-L6-v2-onnx
+
+jobs:
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-latest
+    outputs:
+      scrape_year: ${{ steps.scrape-year.outputs.scrape_year }}
+    steps:
+      - name: Require default branch
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ "$GITHUB_REF_NAME" != "$DEFAULT_BRANCH" ]; then
+            echo "::error::Run this manual deploy from the $DEFAULT_BRANCH branch selector in GitHub Actions."
+            echo "Selected ref: $GITHUB_REF_NAME"
+            exit 1
+          fi
+
+      - name: Validate retention input
+        env:
+          MAX_AGE_DAYS: ${{ inputs.max_age_days }}
+        run: |
+          case "$MAX_AGE_DAYS" in
+            ""|*[!0-9]*)
+              echo "::error::max_age_days must be a positive integer."
+              exit 1
+              ;;
+          esac
+          if [ "$MAX_AGE_DAYS" -lt 1 ]; then
+            echo "::error::max_age_days must be greater than zero."
+            exit 1
+          fi
+
+      - name: Resolve scrape year
+        id: scrape-year
+        env:
+          INPUT_SCRAPE_YEAR: ${{ inputs.scrape_year }}
+        run: |
+          if [ -n "$INPUT_SCRAPE_YEAR" ]; then
+            case "$INPUT_SCRAPE_YEAR" in
+              [0-9][0-9][0-9][0-9])
+                ;;
+              *)
+                echo "::error::scrape_year must be a 4-digit year."
+                exit 1
+                ;;
+            esac
+            CURRENT_YEAR="$(date +%Y)"
+            if [ "$INPUT_SCRAPE_YEAR" -lt 2019 ] || [ "$INPUT_SCRAPE_YEAR" -gt "$CURRENT_YEAR" ]; then
+              echo "::error::scrape_year must be between 2019 and $CURRENT_YEAR."
+              exit 1
+            fi
+            echo "scrape_year=$INPUT_SCRAPE_YEAR" >> "$GITHUB_OUTPUT"
+          else
+            echo "scrape_year=$(date +%Y)" >> "$GITHUB_OUTPUT"
+          fi
+
+  refresh_neon:
+    name: Refresh hosted Neon slice
+    needs: preflight
+    if: ${{ inputs.refresh_neon }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    env:
+      NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+      SCRAPE_YEAR: ${{ needs.preflight.outputs.scrape_year }}
+      MAX_AGE_DAYS: ${{ inputs.max_age_days }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Cache Poetry downloads
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/pypoetry
+          key: poetry-hosted-deploy-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
+          restore-keys: poetry-hosted-deploy-${{ runner.os }}-
+
+      - name: Cache ONNX bundle
+        id: onnx-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: data/models/all-MiniLM-L6-v2-onnx
+          key: hosted-onnx-${{ runner.os }}-all-MiniLM-L6-v2-v1
+
+      - name: Install dependencies
+        run: poetry install --with ml
+
+      - name: Validate required secrets
+        run: |
+          if [ -z "$NEON_DATABASE_URL" ]; then
+            echo "::error::NEON_DATABASE_URL is not configured."
+            exit 1
+          fi
+
+      - name: Export ONNX bundle if cache is cold
+        if: steps.onnx-cache.outputs.cache-hit != 'true'
+        run: |
+          poetry install --with ml_torch
+          poetry run python -m src.cli embed-export-onnx all-MiniLM-L6-v2 --output-dir "$ONNX_MODEL_DIR"
+
+      - name: Scrape current year jobs into Neon
+        run: |
+          poetry run python -m src.cli scrape-historical \
+            --year "$SCRAPE_YEAR" \
+            --resume \
+            --db "$NEON_DATABASE_URL"
+
+      - name: Sync hosted job embeddings
+        run: |
+          poetry run python -m src.cli embed-sync \
+            --db "$NEON_DATABASE_URL" \
+            --embedding-backend onnx \
+            --onnx-model-dir "$ONNX_MODEL_DIR" \
+            --no-update-index
+
+      - name: Purge hosted slice
+        run: |
+          poetry run python -m src.cli pg-purge-hosted \
+            --target "$NEON_DATABASE_URL" \
+            --max-age-days "$MAX_AGE_DAYS"
+
+      - name: Verify hosted retention and embeddings
+        run: |
+          poetry run python - <<'PY'
+          import os
+
+          import psycopg
+
+          dsn = os.environ["NEON_DATABASE_URL"]
+          max_age_days = int(os.environ["MAX_AGE_DAYS"])
+          with psycopg.connect(dsn) as conn:
+              with conn.cursor() as cur:
+                  cur.execute(
+                      """
+                      SELECT COUNT(*)
+                      FROM jobs
+                      WHERE posted_date IS NULL
+                         OR posted_date < GREATEST(
+                              DATE_TRUNC('year', CURRENT_DATE)::date,
+                              CURRENT_DATE - (%s::int * INTERVAL '1 day')
+                            )
+                      """,
+                      (max_age_days,),
+                  )
+                  old_jobs = cur.fetchone()[0]
+                  cur.execute("SELECT COUNT(*) FROM embeddings WHERE entity_type IN ('skill', 'company')")
+                  non_job_embeddings = cur.fetchone()[0]
+                  cur.execute("SELECT COUNT(*) FROM embeddings WHERE entity_type = 'job'")
+                  job_embeddings = cur.fetchone()[0]
+
+          if old_jobs:
+              raise SystemExit(f"Hosted purge failed: {old_jobs} old/null-dated jobs remain")
+          if non_job_embeddings:
+              raise SystemExit(f"Hosted purge failed: {non_job_embeddings} non-job embeddings remain")
+          if job_embeddings == 0:
+              raise SystemExit("Hosted refresh produced zero job embeddings")
+
+          print(f"Verified hosted slice: {job_embeddings} job embeddings, retention window enforced")
+          PY
+
+      - name: Write Neon summary
+        if: always()
+        run: |
+          {
+            echo "## Neon refresh"
+            echo ""
+            echo "- Year: $SCRAPE_YEAR"
+            echo "- Retention days: $MAX_AGE_DAYS"
+            echo "- Refresh requested: ${{ inputs.refresh_neon }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy_huggingface:
+    name: Deploy Hugging Face Space
+    needs:
+      - preflight
+      - refresh_neon
+    if: ${{ always() && needs.preflight.result == 'success' && (needs.refresh_neon.result == 'success' || needs.refresh_neon.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+      HF_SPACE_REPO_ID: ${{ vars.HF_SPACE_REPO_ID }}
+      HF_SOURCE_REPO: ${{ vars.HF_SOURCE_REPO }}
+      HF_CORS_ORIGINS: ${{ vars.HF_CORS_ORIGINS }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deploy dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "huggingface_hub>=0.24"
+
+      - name: Validate required secrets
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "::error::HF_TOKEN is not configured."
+            exit 1
+          fi
+          if [ -z "$NEON_DATABASE_URL" ]; then
+            echo "::error::NEON_DATABASE_URL is not configured."
+            exit 1
+          fi
+
+      - name: Deploy Space
+        run: |
+          : "${HF_SPACE_REPO_ID:=xang1234/jobs-intelligence-api}"
+          : "${HF_SOURCE_REPO:=https://github.com/xang1234/jobs-intelligence.git}"
+          : "${HF_CORS_ORIGINS:=https://jobs-intelligence.pages.dev,https://jobs.deepgradient.uk,https://deepgradient.uk,http://localhost:3000}"
+          export HF_SPACE_REPO_ID HF_SOURCE_REPO HF_CORS_ORIGINS
+
+          python scripts/deploy_huggingface_space.py \
+            --repo-id "$HF_SPACE_REPO_ID" \
+            --source-repo "$HF_SOURCE_REPO" \
+            --source-ref "$GITHUB_REF_NAME" \
+            --source-version "$GITHUB_SHA" \
+            --cors-origins "$HF_CORS_ORIGINS"
+
+      - name: Wait for Space runtime
+        run: |
+          : "${HF_SPACE_REPO_ID:=xang1234/jobs-intelligence-api}"
+          export HF_SPACE_REPO_ID
+
+          python - <<'PY'
+          import os
+          import time
+
+          from huggingface_hub import HfApi
+
+          repo_id = os.environ.get("HF_SPACE_REPO_ID") or "xang1234/jobs-intelligence-api"
+          token = os.environ["HF_TOKEN"]
+          api = HfApi(token=token)
+          for attempt in range(1, 61):
+              runtime = api.get_space_runtime(repo_id)
+              stage = getattr(runtime, "stage", "unknown")
+              print(f"Attempt {attempt}: {stage}")
+              if stage == "RUNNING":
+                  break
+              if stage in {"RUNTIME_ERROR", "BUILD_ERROR"}:
+                  raise SystemExit(f"Space entered {stage}")
+              time.sleep(20)
+          else:
+              raise SystemExit("Space did not reach RUNNING within 20 minutes")
+          PY
+
+      - name: Smoke-test Space health
+        run: |
+          : "${HF_SPACE_REPO_ID:=xang1234/jobs-intelligence-api}"
+          export HF_SPACE_REPO_ID
+          SPACE_HOST="${HF_SPACE_REPO_ID/\//-}.hf.space"
+          curl -fsS --retry 12 --retry-delay 10 --retry-all-errors \
+            "https://${SPACE_HOST}/health"
+
+      - name: Write Hugging Face summary
+        if: always()
+        run: |
+          : "${HF_SPACE_REPO_ID:=xang1234/jobs-intelligence-api}"
+          export HF_SPACE_REPO_ID
+          {
+            echo "## Hugging Face deploy"
+            echo ""
+            echo "- Space: https://huggingface.co/spaces/${HF_SPACE_REPO_ID}"
+            echo "- Source ref: $GITHUB_REF_NAME"
+            echo "- Source version: $GITHUB_SHA"
+          } >> "$GITHUB_STEP_SUMMARY"
