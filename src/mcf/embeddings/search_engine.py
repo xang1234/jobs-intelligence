@@ -267,9 +267,12 @@ class SemanticSearchEngine:
             elif self._has_vector_index and not self._degraded:
                 # Vector-first path: let the configured backend find the best
                 # semantic matches from the full index, then score with BM25.
-                # Re-rank a bounded neighbourhood — 1000 candidates for a 20-row
-                # page meant 1000-row BM25 + freshness fetches every query (issue #10).
-                vector_k = max(200, request.limit * 10)
+                # Re-rank a bounded neighbourhood rather than the old flat 1000 (issue #10),
+                # but widen it as the ranking leans on keywords: BM25 can only score
+                # candidates already in this pool, so a strong keyword match outside a
+                # tight semantic neighbourhood would be dropped. alpha=1 → 200 (pure
+                # semantic), alpha=0 → 1000 (original keyword recall), default 0.7 → 440.
+                vector_k = max(round(200 + (1 - request.alpha) * 800), request.limit * 10)
                 query_embedding = self._get_query_embedding(request.query)
                 semantic_results = self.vector_backend.search_jobs(
                     query_embedding,

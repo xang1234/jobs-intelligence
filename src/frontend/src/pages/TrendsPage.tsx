@@ -189,9 +189,9 @@ export default function TrendsPage() {
   return (
     <div className="space-y-8">
       <PageHero
-        eyebrow="90-day market signals"
+        eyebrow={`${months}-month market signals`}
         title="Decide what to emphasize in your CV and search."
-        subtitle="These charts cover the last three months of postings. When there isn't enough history to call a real trend, we show current demand instead of a misleading growth number."
+        subtitle={`These charts cover the last ${months} month${months === 1 ? '' : 's'} of postings. When there isn't enough history to call a real trend, we show current demand instead of a misleading growth number.`}
         actions={
           <div className="grid gap-3 sm:grid-cols-3">
             <Select<number>
