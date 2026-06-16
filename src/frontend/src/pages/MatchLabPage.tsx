@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import JobCard from '@/components/JobCard'
+import PageHero from '@/components/shell/PageHero'
 import { toast } from '@/components/ui'
 import { analyzeCareerDelta, getCareerDeltaScenarioDetail, matchProfile } from '@/services/api'
 import { buildCareerDeltaAnalysisRequest, buildProfileMatchRequest } from '@/services/matchLab'
@@ -158,16 +159,11 @@ export default function MatchLabPage() {
 
   return (
     <div className="space-y-8">
-      <section className="rounded-[var(--radius-2xl)] border border-[color:var(--border)] bg-[color:var(--surface-1-alpha)] p-8 shadow-[var(--shadow-xl)]">
-        <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[color:var(--ink-subtle)]">Match my CV</p>
-        <h1 className="mt-2 text-4xl font-semibold tracking-tight text-[color:var(--ink)]">
-          Paste your CV. See what fits now — and your best next move.
-        </h1>
-        <p className="mt-3 max-w-3xl text-base leading-7 text-[color:var(--ink-muted)]">
-          Get your strongest matches today, then see the moves that would open up better-paying
-          roles — all from the same profile.
-        </p>
-      </section>
+      <PageHero
+        eyebrow="Match my CV"
+        title="Paste your CV. See what fits now — and your best next move."
+        subtitle="Get your strongest matches today, then see the moves that would open up better-paying roles — all from the same profile."
+      />
 
       <section className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
         <article className="rounded-[var(--radius-xl)] border border-[color:var(--border)] bg-[color:var(--surface-1-alpha)] p-6">

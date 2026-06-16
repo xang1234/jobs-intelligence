@@ -1,15 +1,5 @@
 import type { SkillCloudItem } from '@/types/api'
-
-const CLUSTER_COLORS = [
-  'text-[color:var(--color-info-600)]',
-  'text-[color:var(--color-success-600)]',
-  'text-[color:var(--color-accent-600)]',
-  'text-[color:var(--color-brand-600)]',
-  'text-[color:var(--color-danger-600)]',
-  'text-[color:var(--color-brand-500)]',
-  'text-[color:var(--color-warning-600)]',
-  'text-[color:var(--color-info-700)]',
-]
+import { Chip } from '@/components/ui'
 
 interface SkillCloudProps {
   items: SkillCloudItem[]
@@ -17,43 +7,26 @@ interface SkillCloudProps {
   title?: string
 }
 
-export default function SkillCloud({
-  items,
-  onSkillClick,
-  title = 'Skills',
-}: SkillCloudProps) {
+// ponytail: uniform, scannable chips ranked by count — no variable-size word cloud (issue #7).
+export default function SkillCloud({ items, onSkillClick, title = 'Skills' }: SkillCloudProps) {
   if (items.length === 0) return null
 
-  const maxCount = Math.max(...items.map((i) => i.job_count))
-  const minCount = Math.min(...items.map((i) => i.job_count))
-  const range = maxCount - minCount || 1
-
-  function fontSize(count: number): string {
-    const ratio = (count - minCount) / range
-    const size = 0.8 + ratio * 0.75
-    return `${size}rem`
-  }
-
-  function colorClass(clusterId: number | null): string {
-    if (clusterId == null) return 'text-[color:var(--ink-muted)]'
-    return CLUSTER_COLORS[clusterId % CLUSTER_COLORS.length]
-  }
+  const ranked = [...items].sort((a, b) => b.job_count - a.job_count)
 
   return (
     <div>
       <h3 className="mb-3 text-sm font-semibold text-[color:var(--ink)]">{title}</h3>
-      <div className="flex flex-wrap gap-x-2.5 gap-y-1.5">
-        {items.map((item) => (
-          <button
+      <div className="flex flex-wrap gap-2">
+        {ranked.map((item) => (
+          <Chip
             key={item.skill}
-            type="button"
+            intent="neutral"
+            size="md"
             onClick={() => onSkillClick(item.skill)}
-            style={{ fontSize: fontSize(item.job_count) }}
-            className={`cursor-pointer font-medium leading-relaxed transition hover:underline focus-visible:outline-none ${colorClass(item.cluster_id)}`}
             title={`${item.job_count.toLocaleString()} jobs`}
           >
-            {item.skill}
-          </button>
+            {item.skill} <span className="opacity-60">({item.job_count.toLocaleString()})</span>
+          </Chip>
         ))}
       </div>
     </div>

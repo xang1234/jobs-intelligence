@@ -126,7 +126,8 @@
   --bg: var(--color-neutral-100);
   --ink: var(--color-neutral-900);
   --ink-muted: var(--color-neutral-600);
-  --ink-subtle: var(--color-neutral-500);
+  /* Darkened from neutral-500 (3.6:1) to clear WCAG AA 4.5:1 for eyebrow/caption text (issue #9). */
+  --ink-subtle: #736e60;
 
   --surface-1: #ffffff;
   --surface-1-alpha: rgba(255, 255, 255, 0.95);
@@ -175,7 +176,8 @@
   --bg: var(--color-neutral-950);
   --ink: #f5f1e4;
   --ink-muted: #bdb7a6;
-  --ink-subtle: #8b8676;
+  /* Lightened from #8b8676 (4.4:1) to clear WCAG AA 4.5:1 on dark surfaces (issue #9). */
+  --ink-subtle: #9a9482;
 
   --surface-1: #1a2423;
   --surface-1-alpha: rgba(26, 36, 35, 0.92);

@@ -1,12 +1,13 @@
 import type { JobResult } from '@/types/api'
 import {
+  ArrowTopRightOnSquareIcon,
   BriefcaseIcon,
   ChartBarSquareIcon,
   CurrencyDollarIcon,
   MapPinIcon,
   SparklesIcon,
 } from '@heroicons/react/24/outline'
-import { Badge, Button, Card, Chip } from '@/components/ui'
+import { Badge, Button, buttonClasses, Card, Chip } from '@/components/ui'
 
 interface JobCardProps {
   job: JobResult
@@ -14,11 +15,12 @@ interface JobCardProps {
 }
 
 function formatSalary(min: number | null, max: number | null): string | null {
+  // MyCareersFuture salaries are monthly — label the unit so it can't be read as annual (issue #4).
   if (min != null && max != null) {
-    return `$${min.toLocaleString()} - $${max.toLocaleString()}`
+    return `$${min.toLocaleString()} - $${max.toLocaleString()}/mo`
   }
-  if (min != null) return `From $${min.toLocaleString()}`
-  if (max != null) return `Up to $${max.toLocaleString()}`
+  if (min != null) return `From $${min.toLocaleString()}/mo`
+  if (max != null) return `Up to $${max.toLocaleString()}/mo`
   return null
 }
 
@@ -63,13 +65,11 @@ export default function JobCard({ job, onFindSimilar }: JobCardProps) {
             {job.seniority && <Chip intent="neutral" size="sm">{job.seniority}</Chip>}
           </div>
         </div>
+        {/* Single FIT score up top; semantic/keyword live in the Score breakdown below (issue #14). */}
         <div className="flex flex-wrap items-center gap-2">
           <Badge intent={fitIntent(job.similarity_score)}>
             {(job.similarity_score * 100).toFixed(0)}% fit
           </Badge>
-          {job.semantic_score != null && (
-            <Chip intent="neutral" size="sm">semantic {pct(job.semantic_score)}</Chip>
-          )}
         </div>
       </div>
 
@@ -172,11 +172,25 @@ export default function JobCard({ job, onFindSimilar }: JobCardProps) {
         </div>
       )}
 
-      {onFindSimilar && (
-        <div className="mt-5">
-          <Button variant="secondary" size="sm" onClick={() => onFindSimilar(job.uuid)}>
-            Explore similar roles
-          </Button>
+      {(job.job_url || onFindSimilar) && (
+        <div className="mt-5 flex flex-wrap gap-3">
+          {/* Primary path to the user's actual goal — the live posting (issue #8). */}
+          {job.job_url && (
+            <a
+              href={job.job_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={buttonClasses('primary', 'sm')}
+            >
+              View on MyCareersFuture
+              <ArrowTopRightOnSquareIcon className="h-4 w-4" aria-hidden="true" />
+            </a>
+          )}
+          {onFindSimilar && (
+            <Button variant="secondary" size="sm" onClick={() => onFindSimilar(job.uuid)}>
+              Explore similar roles
+            </Button>
+          )}
         </div>
       )}
     </Card>

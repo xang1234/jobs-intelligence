@@ -208,6 +208,17 @@ class SemanticSearchEngine:
         self._loaded = True
         return not self._degraded
 
+    def warm(self, query: str = "software engineer") -> None:
+        """
+        Pre-load the embedding model so the first real query doesn't pay init cost.
+
+        The engine owns *how* it warms (the model lives behind the generator);
+        callers just ask it to warm. Safe to call before/after load().
+        """
+        if not self._loaded:
+            self.load()
+        self._get_query_embedding(query)
+
     def search(self, request: SearchRequest) -> SearchResponse:
         """
         Main semantic search with all features.
@@ -245,6 +256,9 @@ class SemanticSearchEngine:
             # When unfiltered and vectors are available, search the full vector
             # backend directly to avoid loading millions of rows just to re-rank.
             has_filters = self._has_sql_filters(request)
+            # Semantic scores reused from the vector-first search, so the hybrid
+            # step never re-queries the backend for scores it already has (issue #10).
+            precomputed_semantic: dict[str, float] | None = None
 
             if has_filters:
                 candidates = self._apply_sql_filters(request)
@@ -253,19 +267,23 @@ class SemanticSearchEngine:
             elif self._has_vector_index and not self._degraded:
                 # Vector-first path: let the configured backend find the best
                 # semantic matches from the full index, then score with BM25.
-                vector_k = max(1000, request.limit * 50)
+                # Re-rank a bounded neighbourhood — 1000 candidates for a 20-row
+                # page meant 1000-row BM25 + freshness fetches every query (issue #10).
+                vector_k = max(200, request.limit * 10)
                 query_embedding = self._get_query_embedding(request.query)
                 semantic_results = self.vector_backend.search_jobs(
                     query_embedding,
                     k=vector_k,
                 )
                 candidate_uuids = [uuid for uuid, _ in semantic_results]
+                precomputed_semantic = {uuid: score for uuid, score in semantic_results}
                 total_candidates = self.vector_backend.total_jobs()
                 if not candidate_uuids:
                     logger.warning("Vector backend returned no candidates; falling back to SQL candidate selection.")
                     candidates = self._apply_sql_filters(request)
                     total_candidates = len(candidates)
                     candidate_uuids = [c["uuid"] for c in candidates]
+                    precomputed_semantic = None
             else:
                 # Degraded / no vectors: fall back to SQL with a generous cap
                 candidates = self._apply_sql_filters(request)
@@ -303,6 +321,7 @@ class SemanticSearchEngine:
                     candidate_uuids=candidate_uuids,
                     alpha=request.alpha,
                     freshness_weight=request.freshness_weight,
+                    precomputed_semantic=precomputed_semantic,
                 )
             else:
                 # Degraded mode: keyword-only search
@@ -953,6 +972,7 @@ class SemanticSearchEngine:
         candidate_uuids: list[str],
         alpha: float,
         freshness_weight: float,
+        precomputed_semantic: dict[str, float] | None = None,
     ) -> tuple[list[tuple[str, float]], dict[str, dict[str, float | list[str]]]]:
         """
         Compute hybrid scores combining semantic and keyword search.
@@ -965,25 +985,29 @@ class SemanticSearchEngine:
             candidate_uuids: UUIDs to score
             alpha: Weight for semantic vs keyword (1.0 = semantic only)
             freshness_weight: Weight for freshness boost
+            precomputed_semantic: Semantic scores already returned by the vector-first
+                search — when present, skip the redundant filtered re-query (issue #10).
 
         Returns:
             List of (uuid, score) tuples, sorted by score descending
         """
         candidate_set = set(candidate_uuids)
 
-        # Get query embedding
-        query_embedding = self._get_query_embedding(query)
-
-        # Get semantic scores via filtered vector search
-        try:
-            semantic_results = self.vector_backend.search_jobs_filtered(
-                query_embedding,
-                candidate_uuids=list(candidate_set),
-                k=len(candidate_uuids),
-            )
-            semantic_scores = {uuid: score for uuid, score in semantic_results}
-        except IndexNotBuiltError:
-            semantic_scores = {}
+        if precomputed_semantic is not None:
+            semantic_scores = precomputed_semantic
+        else:
+            # SQL-filtered path: candidates came from SQL, so fetch their semantic
+            # scores via a filtered vector search.
+            query_embedding = self._get_query_embedding(query)
+            try:
+                semantic_results = self.vector_backend.search_jobs_filtered(
+                    query_embedding,
+                    candidate_uuids=list(candidate_set),
+                    k=len(candidate_uuids),
+                )
+                semantic_scores = {uuid: score for uuid, score in semantic_results}
+            except IndexNotBuiltError:
+                semantic_scores = {}
 
         # Get BM25 scores
         bm25_scores = self._get_bm25_scores(search_query, candidate_uuids)

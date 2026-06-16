@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowDownRightIcon, ArrowRightIcon, ArrowUpRightIcon } from '@heroicons/react/20/solid'
 import TrendSparkline from '@/components/TrendSparkline'
+import PageHero from '@/components/shell/PageHero'
 import { Button, Card, Chip, EmptyState, Input, Select, Skeleton } from '@/components/ui'
 import type { ChipIntent, SelectOption } from '@/components/ui'
 import { findSimilarCompanies, getCompanyTrend, getOverview, getRoleTrend, getSkillTrends } from '@/services/api'
@@ -10,7 +11,7 @@ import type { SkillTrendSeries, TrendPoint } from '@/types/api'
 
 function formatMoney(value: number | null): string {
   if (value == null) return 'N/A'
-  return `$${value.toLocaleString()}`
+  return `$${value.toLocaleString()}/yr`
 }
 
 function formatMonth(value: string | null | undefined): string {
@@ -187,20 +188,11 @@ export default function TrendsPage() {
 
   return (
     <div className="space-y-8">
-      <Card as="section" radius="2xl" className="p-8">
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <div className="max-w-3xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[color:var(--ink-subtle)]">
-              90-day market signals
-            </p>
-            <h1 className="mt-2 text-4xl font-semibold tracking-tight text-[color:var(--ink)]">
-              Decide what to emphasize in your CV and search.
-            </h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-[color:var(--ink-muted)]">
-              These charts cover the last three months of postings. When there isn't enough history to call a real
-              trend, we show current demand instead of a misleading growth number.
-            </p>
-          </div>
+      <PageHero
+        eyebrow="90-day market signals"
+        title="Decide what to emphasize in your CV and search."
+        subtitle="These charts cover the last three months of postings. When there isn't enough history to call a real trend, we show current demand instead of a misleading growth number."
+        actions={
           <div className="grid gap-3 sm:grid-cols-3">
             <Select<number>
               label="Time window"
@@ -222,9 +214,9 @@ export default function TrendsPage() {
               placeholder="Singapore"
             />
           </div>
-        </div>
-
-        <div className="mt-6 grid gap-3 sm:grid-cols-3">
+        }
+      >
+        <div className="grid gap-3 sm:grid-cols-3">
           <SignalMetric
             label="Jobs in latest month"
             value={(overview.data?.headline_metrics.current_month_jobs ?? 0).toLocaleString()}
@@ -241,7 +233,7 @@ export default function TrendsPage() {
             detail="growth shown only with enough history"
           />
         </div>
-      </Card>
+      </PageHero>
 
       <section className="grid items-start gap-6 xl:grid-cols-2">
         <Card as="article" radius="xl" className="p-6">

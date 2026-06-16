@@ -24,24 +24,25 @@ export default function TrendSparkline({
   const svgRef = useRef<SVGSVGElement>(null)
   const [activeIndex, setActiveIndex] = useState<number | null>(null)
 
-  const { coords, maxValue, minValue } = useMemo(() => {
+  const { coords, maxValue, minValue, avgY } = useMemo(() => {
     if (points.length === 0) {
-      return { coords: [] as { x: number; y: number }[], maxValue: 0, minValue: 0 }
+      return { coords: [] as { x: number; y: number }[], maxValue: 0, minValue: 0, avgY: 0 }
     }
     const counts = points.map((p) => p.job_count)
     const max = Math.max(...counts, 1)
     const min = Math.min(...counts, 0)
     const range = max - min || 1
+    const toY = (v: number) => HEIGHT - PADDING - ((v - min) / range) * (HEIGHT - PADDING * 2)
     const xs = points.map((_, i) => {
       return PADDING + (i / Math.max(points.length - 1, 1)) * (WIDTH - PADDING * 2)
     })
-    const ys = points.map(
-      (p) => HEIGHT - PADDING - ((p.job_count - min) / range) * (HEIGHT - PADDING * 2),
-    )
+    const ys = points.map((p) => toY(p.job_count))
+    const avg = counts.reduce((sum, c) => sum + c, 0) / counts.length
     return {
       coords: xs.map((x, i) => ({ x, y: ys[i] })),
       maxValue: max,
       minValue: min,
+      avgY: toY(avg),
     }
   }, [points])
 
@@ -95,6 +96,16 @@ export default function TrendSparkline({
           </linearGradient>
         </defs>
         <polygon fill={`url(#spark-fill-${id})`} points={areaPoints} />
+        {/* Baseline at the series average — gives the line something to read against (issue #6). */}
+        <line
+          x1={PADDING}
+          x2={WIDTH - PADDING}
+          y1={avgY}
+          y2={avgY}
+          className="stroke-[color:var(--border-default)]"
+          strokeDasharray="3 3"
+          strokeWidth="1"
+        />
         <polyline
           fill="none"
           strokeWidth="2.5"
@@ -137,6 +148,13 @@ export default function TrendSparkline({
           <div>{valueFormatter(active)}</div>
         </div>
       )}
+      {/* Always-visible endpoints so the chart is readable without hovering (issue #6). */}
+      <div className="mt-1.5 flex items-center justify-between text-[10px] text-[color:var(--ink-subtle)]">
+        <span>{points[0].month}</span>
+        <span className="font-medium text-[color:var(--ink-muted)]">
+          latest {valueFormatter(points[points.length - 1])}
+        </span>
+      </div>
     </div>
   )
 }
