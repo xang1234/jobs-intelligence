@@ -31,5 +31,5 @@ MCF_CORS_ORIGINS=https://jobs-intelligence.pages.dev,https://jobs.deepgradient.u
 MCF_RATE_LIMIT_RPM=100
 SOURCE_REPO=https://github.com/xang1234/jobs-intelligence.git
 SOURCE_REF=master
-SOURCE_VERSION=<git-sha-or-cache-buster>
+SOURCE_VERSION=<git-sha-to-check-out>
 ```

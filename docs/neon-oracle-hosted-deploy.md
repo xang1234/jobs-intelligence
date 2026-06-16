@@ -189,7 +189,9 @@ Run it from GitHub:
 
 The manual workflow can refresh/purge Neon first, then deploy the Hugging Face
 Space with `SOURCE_REF=<selected default branch>` and
-`SOURCE_VERSION=<workflow commit SHA>`.
+`SOURCE_VERSION=<workflow commit SHA>`. The Space build checks out
+`SOURCE_VERSION`, so a long Neon refresh cannot accidentally publish a newer
+branch head.
 
 ## 5. API Hosting Option A: Hugging Face Spaces
 
@@ -202,8 +204,10 @@ This repo includes a Docker Space payload:
 - [deploy/huggingface-space/README.md](../deploy/huggingface-space/README.md)
 - [scripts/deploy_huggingface_space.py](../scripts/deploy_huggingface_space.py)
 
-The Space builds a Docker image, clones this repo at `SOURCE_REF`, exports the
-ONNX model bundle during build, and runs FastAPI on `${PORT:-8000}`.
+The Space builds a Docker image, checks out this repo at `SOURCE_VERSION` when
+it is set, exports the ONNX model bundle during build, and runs FastAPI on
+`${PORT:-8000}`. `SOURCE_REF` remains the branch/ref context and is used as a
+fallback when `SOURCE_VERSION` is unset or `dev`.
 
 Required Hugging Face Space secret:
 
@@ -221,11 +225,12 @@ MCF_CORS_ORIGINS=https://jobs-intelligence.pages.dev,https://jobs.deepgradient.u
 MCF_RATE_LIMIT_RPM=100
 SOURCE_REPO=https://github.com/xang1234/jobs-intelligence.git
 SOURCE_REF=master
-SOURCE_VERSION=<git-sha-or-cache-buster>
+SOURCE_VERSION=<git-sha-to-check-out>
 ```
 
 `scripts/deploy_huggingface_space.py` sets `SOURCE_VERSION` from the local git
-revision by default so Docker rebuilds the repo clone layer when the ref moves.
+revision by default so Docker checks out the exact source revision during the
+Space build.
 
 Deploy with:
 
