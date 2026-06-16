@@ -19,7 +19,7 @@ const EMPLOYMENT_OPTIONS: ReadonlyArray<SelectOption<string>> = [
 ]
 
 function formatMoney(value: number): string {
-  return `$${value.toLocaleString()}`
+  return `$${value.toLocaleString()}/mo`
 }
 
 export default function FilterPanel({

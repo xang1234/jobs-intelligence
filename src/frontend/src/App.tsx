@@ -98,13 +98,14 @@ export default function App() {
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
         <header className="rounded-[var(--radius-2xl)] border border-[color:var(--border)] bg-[color:var(--surface-1-alpha)] p-5 shadow-[var(--shadow-xl)] backdrop-blur">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            {/* Compact app bar: brand + tagline only — each page owns its own <h1> (issue #12). */}
             <div className="min-w-0">
               <p className="text-xs font-semibold uppercase tracking-[0.26em] text-[color:var(--ink-subtle)]">
                 MCF Intelligence
               </p>
-              <h1 className="mt-2 text-2xl font-semibold tracking-tight text-[color:var(--ink)]">
+              <p className="mt-1 text-sm font-medium text-[color:var(--ink-muted)]">
                 Find roles that fit you — and see where Singapore is hiring
-              </h1>
+              </p>
             </div>
 
             <div className="flex items-center justify-between gap-3 lg:justify-end">
@@ -141,7 +142,7 @@ export default function App() {
                   aria-label="Open command palette"
                 >
                   <MagnifyingGlassIcon className="h-4 w-4" aria-hidden="true" />
-                  <span>Quick jump</span>
+                  <span>Go to…</span>
                   <span className="inline-flex items-center gap-0.5">
                     <Kbd>⌘</Kbd>
                     <Kbd>K</Kbd>

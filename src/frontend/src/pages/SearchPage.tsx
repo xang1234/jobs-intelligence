@@ -10,6 +10,7 @@ import SearchBar, { type SearchBarHandle } from '@/components/SearchBar'
 import SearchStats from '@/components/SearchStats'
 import SimilarJobsModal from '@/components/SimilarJobsModal'
 import SkillCloud from '@/components/SkillCloud'
+import PageHero from '@/components/shell/PageHero'
 import { Card } from '@/components/ui'
 import { useIdleEnabled } from '@/hooks/useIdleEnabled'
 import { useUrlFilters } from '@/hooks/useUrlFilters'
@@ -92,23 +93,18 @@ export default function SearchPage() {
 
   return (
     <div className="space-y-6">
-      <Card as="section" radius="2xl" className="p-6 sm:p-7">
-        <h1 className="text-2xl font-semibold tracking-tight text-[color:var(--ink)] sm:text-3xl">
-          Find your next role
-        </h1>
-        <p className="mt-1.5 max-w-2xl text-sm leading-6 text-[color:var(--ink-muted)]">
-          Search across Singapore job listings — type a role in plain words and we expand your
-          query and surface related skills automatically. No exact keywords needed.
-        </p>
-        <div className="mt-4">
-          <SearchBar
-            ref={searchBarRef}
-            onSearch={setQuery}
-            isLoading={searchResult.isFetching}
-            defaultValue={query}
-            placeholder="Try: machine learning engineer, registered nurse, product manager…"
-          />
-        </div>
+      <PageHero
+        eyebrow="Find jobs"
+        title="Find your next role"
+        subtitle="Search across Singapore job listings — type a role in plain words and we expand your query and surface related skills automatically. No exact keywords needed."
+      >
+        <SearchBar
+          ref={searchBarRef}
+          onSearch={setQuery}
+          isLoading={searchResult.isFetching}
+          defaultValue={query}
+          placeholder="Try: machine learning engineer, registered nurse, product manager…"
+        />
         <div className="mt-3">
           <ActiveFiltersBar
             query={query}
@@ -118,7 +114,7 @@ export default function SearchPage() {
             onClearAll={clearAll}
           />
         </div>
-      </Card>
+      </PageHero>
 
       <DegradedBanner show={health.data?.degraded ?? false} />
 

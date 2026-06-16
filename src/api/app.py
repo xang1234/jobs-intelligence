@@ -330,6 +330,18 @@ async def lifespan(app: FastAPI):
 
     if loaded:
         logger.info("Search indexes loaded successfully")
+
+        # Warm the embedding model off the request critical path: the first real
+        # query otherwise pays model-init cost on top of any cold start (issue #10).
+        # Hold the task reference so it can't be garbage-collected mid-flight.
+        async def _warm_embeddings() -> None:
+            try:
+                await loop.run_in_executor(_engine_executor, _search_engine.warm)
+                logger.info("Embedding model warm-up complete")
+            except Exception as exc:  # best-effort — never block readiness
+                logger.warning("Embedding model warm-up failed: %s", exc)
+
+        app.state.warmup_task = asyncio.create_task(_warm_embeddings())
     else:
         logger.warning("Search engine running in degraded mode (keyword-only)")
 

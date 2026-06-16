@@ -1,9 +1,9 @@
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { cn } from './cn'
 import { Spinner } from './Spinner'
+import { buttonClasses, type ButtonSize, type ButtonVariant } from './buttonClasses'
 
-export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'link'
-export type ButtonSize = 'sm' | 'md' | 'lg'
+export type { ButtonVariant, ButtonSize }
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant
@@ -12,36 +12,6 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   iconLeft?: ReactNode
   iconRight?: ReactNode
   fullWidth?: boolean
-}
-
-const BASE =
-  'inline-flex items-center justify-center gap-2 rounded-full font-semibold select-none whitespace-nowrap transition ' +
-  'disabled:cursor-not-allowed disabled:opacity-50 ' +
-  'motion-safe:active:translate-y-px ' +
-  'focus-visible:outline-none'
-
-const SIZE: Record<ButtonSize, string> = {
-  sm: 'h-8 px-3 text-xs',
-  md: 'h-10 px-4 text-sm',
-  lg: 'h-12 px-6 text-base',
-}
-
-const VARIANT: Record<ButtonVariant, string> = {
-  primary:
-    'bg-[color:var(--brand)] text-white shadow-[var(--shadow-md)] ' +
-    'hover:bg-[color:var(--brand-strong)] hover:shadow-[var(--shadow-lg)]',
-  secondary:
-    'bg-[color:var(--surface-1)] text-[color:var(--ink)] border border-[color:var(--border)] shadow-[var(--shadow-xs)] ' +
-    'hover:border-[color:var(--border-strong)] hover:text-[color:var(--brand)]',
-  ghost:
-    'bg-transparent text-[color:var(--ink)] ' +
-    'hover:bg-[color:var(--surface-2)]',
-  danger:
-    'bg-[color:var(--color-danger-600)] text-white shadow-[var(--shadow-md)] ' +
-    'hover:bg-[color:var(--color-danger-700)]',
-  link:
-    'bg-transparent text-[color:var(--brand)] underline-offset-4 ' +
-    'hover:text-[color:var(--brand-strong)] hover:underline',
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
@@ -60,18 +30,24 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   },
   ref,
 ) {
+  // A truly-disabled button looks muted (grey), not a dimmed copy of its active colour (issue #15).
+  // Loading keeps the brand colour + spinner, so it still reads as "working".
+  const muted = disabled && !loading
   return (
     <button
       ref={ref}
       type={type}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
-      className={cn(
-        BASE,
-        SIZE[size],
-        VARIANT[variant],
-        fullWidth && 'w-full',
-        className,
+      className={buttonClasses(
+        variant,
+        size,
+        cn(
+          fullWidth && 'w-full',
+          muted &&
+            'bg-[color:var(--surface-3)]! text-[color:var(--ink-subtle)]! border-transparent! shadow-none!',
+          className,
+        ),
       )}
       {...rest}
     >

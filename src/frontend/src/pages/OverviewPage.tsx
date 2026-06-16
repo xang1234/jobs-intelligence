@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { ArrowDownRightIcon, ArrowUpRightIcon, ChartBarIcon } from '@heroicons/react/20/solid'
 import MetricCard from '@/components/overview/MetricCard'
+import PageHero from '@/components/shell/PageHero'
 import { Card, Chip, EmptyState, Skeleton, SkeletonText } from '@/components/ui'
 import { useIdleEnabled } from '@/hooks/useIdleEnabled'
 import { getOverview, getPopularQueries } from '@/services/api'
@@ -8,7 +9,7 @@ import type { MomentumCard } from '@/types/api'
 
 function formatMoney(value: number | null): string {
   if (value == null) return 'N/A'
-  return `$${value.toLocaleString()}`
+  return `$${value.toLocaleString()}/yr`
 }
 
 export default function OverviewPage() {
@@ -25,26 +26,12 @@ export default function OverviewPage() {
 
   return (
     <div className="space-y-8">
-      <Card
-        as="section"
-        radius="2xl"
-        elevation={2}
-        className="p-8"
-        style={{
-          background:
-            'linear-gradient(135deg, color-mix(in srgb, var(--color-accent-100) 70%, var(--surface-1-alpha)), color-mix(in srgb, var(--color-brand-100) 50%, var(--surface-1-alpha)))',
-        }}
-      >
-        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[color:var(--ink-muted)]">
-          Singapore hiring market · last 90 days
-        </p>
-        <h1 className="mt-3 max-w-3xl text-4xl font-semibold tracking-tight text-[color:var(--ink)] sm:text-5xl">
-          What's hiring, what it pays, and what changed.
-        </h1>
-        <p className="mt-3 max-w-2xl text-base leading-7 text-[color:var(--ink-muted)]">
-          A quick read on demand, salaries, and the companies and skills moving fastest right now.
-        </p>
-      </Card>
+      <PageHero
+        tone="brand"
+        eyebrow="Singapore hiring market · last 90 days"
+        title="What's hiring, what it pays, and what changed."
+        subtitle="A quick read on demand, salaries, and the companies and skills moving fastest right now."
+      />
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
