@@ -1,0 +1,4 @@
+# Content-hashed build assets never change for a given URL — cache them
+# forever so repeat visits skip revalidation round-trips.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
