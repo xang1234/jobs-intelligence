@@ -160,7 +160,7 @@ This is a scheduled batch refresh, not a daemon:
 ### Manual Hosted Deploy
 
 Use [hosted-deploy.yml](../.github/workflows/hosted-deploy.yml) when you want
-to deploy the latest `master` branch to both Neon and the Hugging Face Space
+to deploy the repository default branch to both Neon and the Hugging Face Space
 from the GitHub Actions UI. It is intentionally manual-only and does not run on
 merge.
 
@@ -183,11 +183,13 @@ Run it from GitHub:
 
 1. Open **Actions**.
 2. Select **Manual Hosted Deploy**.
-3. Choose the `master` branch in the workflow branch selector.
+3. Choose the repository default branch in the workflow branch selector
+   (`master` in this repo).
 4. Click **Run workflow**.
 
 The manual workflow can refresh/purge Neon first, then deploy the Hugging Face
-Space with `SOURCE_REF=master` and `SOURCE_VERSION=<workflow commit SHA>`.
+Space with `SOURCE_REF=<selected default branch>` and
+`SOURCE_VERSION=<workflow commit SHA>`.
 
 ## 5. API Hosting Option A: Hugging Face Spaces
 

@@ -19,6 +19,9 @@ on:
         type: string
         default: "90"
 
+permissions:
+  contents: read
+
 concurrency:
   group: manual-hosted-deploy
   cancel-in-progress: false
@@ -33,10 +36,12 @@ jobs:
     outputs:
       scrape_year: ${{ steps.scrape-year.outputs.scrape_year }}
     steps:
-      - name: Require master branch
+      - name: Require default branch
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          if [ "$GITHUB_REF_NAME" != "master" ]; then
-            echo "::error::Run this manual deploy from the master branch selector in GitHub Actions."
+          if [ "$GITHUB_REF_NAME" != "$DEFAULT_BRANCH" ]; then
+            echo "::error::Run this manual deploy from the $DEFAULT_BRANCH branch selector in GitHub Actions."
             echo "Selected ref: $GITHUB_REF_NAME"
             exit 1
           fi
@@ -62,6 +67,19 @@ jobs:
           INPUT_SCRAPE_YEAR: ${{ inputs.scrape_year }}
         run: |
           if [ -n "$INPUT_SCRAPE_YEAR" ]; then
+            case "$INPUT_SCRAPE_YEAR" in
+              [0-9][0-9][0-9][0-9])
+                ;;
+              *)
+                echo "::error::scrape_year must be a 4-digit year."
+                exit 1
+                ;;
+            esac
+            CURRENT_YEAR="$(date +%Y)"
+            if [ "$INPUT_SCRAPE_YEAR" -lt 2019 ] || [ "$INPUT_SCRAPE_YEAR" -gt "$CURRENT_YEAR" ]; then
+              echo "::error::scrape_year must be between 2019 and $CURRENT_YEAR."
+              exit 1
+            fi
             echo "scrape_year=$INPUT_SCRAPE_YEAR" >> "$GITHUB_OUTPUT"
           else
             echo "scrape_year=$(date +%Y)" >> "$GITHUB_OUTPUT"
@@ -80,11 +98,12 @@ jobs:
       SCRAPE_YEAR: ${{ needs.preflight.outputs.scrape_year }}
       MAX_AGE_DAYS: ${{ inputs.max_age_days }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: master
+          ref: ${{ github.sha }}
+          persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
 
@@ -92,7 +111,7 @@ jobs:
         run: pipx install poetry
 
       - name: Cache Poetry downloads
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/pypoetry
           key: poetry-hosted-deploy-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
@@ -100,7 +119,7 @@ jobs:
 
       - name: Cache ONNX bundle
         id: onnx-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: data/models/all-MiniLM-L6-v2-onnx
           key: hosted-onnx-${{ runner.os }}-all-MiniLM-L6-v2-v1
@@ -209,11 +228,12 @@ jobs:
       HF_SOURCE_REPO: ${{ vars.HF_SOURCE_REPO }}
       HF_CORS_ORIGINS: ${{ vars.HF_CORS_ORIGINS }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: master
+          ref: ${{ github.sha }}
+          persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
 
