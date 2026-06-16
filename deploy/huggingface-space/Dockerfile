@@ -21,11 +21,9 @@ RUN set -eux; \
     checkout_ref="$SOURCE_VERSION"; \
     if [ -z "$checkout_ref" ] || [ "$checkout_ref" = "dev" ]; then checkout_ref="$SOURCE_REF"; fi; \
     echo "Building $SOURCE_REPO@$SOURCE_REF ($SOURCE_VERSION; checkout $checkout_ref)"; \
-    git init app; \
+    git clone --filter=blob:none --branch "$SOURCE_REF" "$SOURCE_REPO" app; \
     cd app; \
-    git remote add origin "$SOURCE_REPO"; \
-    git fetch --depth 1 origin "$checkout_ref"; \
-    git checkout --detach FETCH_HEAD
+    git checkout --detach "$checkout_ref"
 
 WORKDIR /build/app
 RUN poetry export -f requirements.txt --without-hashes --without dev --with ml -o requirements.txt
