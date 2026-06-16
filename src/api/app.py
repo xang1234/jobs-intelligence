@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Optional
 
 from cachetools import TTLCache
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -77,7 +77,7 @@ from .models import (
     StatsResponse,
     TrendPoint,
 )
-from .response_cache import cached_public_response
+from .response_cache import cached_public_response, public_cache_headers
 
 logger = logging.getLogger(__name__)
 
@@ -90,13 +90,6 @@ _search_engine: Optional[SemanticSearchEngine] = None
 _engine_executor = ThreadPoolExecutor(max_workers=1)
 MATCH_LAB_RESPONSE_CACHE_TTL_SECONDS = 300
 MATCH_LAB_RESPONSE_CACHE_MAX_ENTRIES = 128
-
-# Public read endpoints return data that is identical for every user and only
-# changes when the nightly refresh runs, so they are safe to cache at the CDN
-# edge. s-maxage lets Cloudflare serve repeat hits from its Singapore edge with
-# zero round-trip to the US-hosted backend; stale-while-revalidate hides the
-# background refresh so users never block on a cold recompute.
-PUBLIC_CACHE_CONTROL = "public, s-maxage=600, stale-while-revalidate=86400"
 
 
 class _CareerDeltaTaxonomyHelper:
@@ -160,15 +153,6 @@ def _get_match_lab_response_cache(engine: SemanticSearchEngine, name: str) -> TT
 def _request_cache_key(prefix: str, request) -> str:
     """Build a stable cache key for exact API request replays."""
     return f"{prefix}:{request.model_dump_json()}"
-
-
-def _public_cache_headers(response: Response) -> None:
-    """Route dependency: mark a public read response as edge-cacheable.
-
-    Cloudflare honors the s-maxage directive and caches the response at the
-    edge, so repeat visitors are served locally without hitting the backend.
-    """
-    response.headers["Cache-Control"] = PUBLIC_CACHE_CONTROL
 
 
 def _prewarm_public_reads(engine: SemanticSearchEngine) -> None:
@@ -612,7 +596,7 @@ def _register_routes(app: FastAPI) -> None:
         min_jobs: int = Query(10, ge=1, description="Minimum jobs for a skill to appear"),
         limit: int = Query(100, ge=1, le=500, description="Maximum skills to return"),
         engine: SemanticSearchEngine = Depends(get_engine),
-        _: None = Depends(_public_cache_headers),
+        _: None = Depends(public_cache_headers),
     ) -> SkillCloudResponse:
         """
         Get skill frequency data for visualization.
@@ -640,7 +624,7 @@ def _register_routes(app: FastAPI) -> None:
         skill: str,
         k: int = Query(10, ge=1, le=50, description="Number of related skills"),
         engine: SemanticSearchEngine = Depends(get_engine),
-        _: None = Depends(_public_cache_headers),
+        _: None = Depends(public_cache_headers),
     ) -> RelatedSkillsResponse:
         """
         Get skills related to a given skill.
@@ -684,7 +668,7 @@ def _register_routes(app: FastAPI) -> None:
     async def get_overview(
         months: int = Query(12, ge=3, le=24, description="Number of months to summarize"),
         engine: SemanticSearchEngine = Depends(get_engine),
-        _: None = Depends(_public_cache_headers),
+        _: None = Depends(public_cache_headers),
     ) -> OverviewResponse:
         """Get summary cards and top movers for the overview page."""
 
@@ -778,7 +762,7 @@ def _register_routes(app: FastAPI) -> None:
         months: int = Query(3, ge=1, le=3, description="Number of months to analyze"),
         include_similar: bool = Query(True, description="Include similar employer profiles"),
         engine: SemanticSearchEngine = Depends(get_engine),
-        _: None = Depends(_public_cache_headers),
+        _: None = Depends(public_cache_headers),
     ) -> CompanyTrendResponse:
         """Get hiring trend, skill mix, and similar employers for one company."""
 
@@ -917,7 +901,7 @@ def _register_routes(app: FastAPI) -> None:
     @app.get("/api/stats", response_model=StatsResponse)
     async def get_stats(
         engine: SemanticSearchEngine = Depends(get_engine),
-        _: None = Depends(_public_cache_headers),
+        _: None = Depends(public_cache_headers),
     ) -> StatsResponse:
         """Get system statistics (index size, coverage, etc.)."""
 
@@ -947,7 +931,7 @@ def _register_routes(app: FastAPI) -> None:
         days: int = 7,
         limit: int = 20,
         engine: SemanticSearchEngine = Depends(get_engine),
-        _: None = Depends(_public_cache_headers),
+        _: None = Depends(public_cache_headers),
     ) -> list[dict]:
         """Get most popular search queries."""
 
@@ -965,7 +949,7 @@ def _register_routes(app: FastAPI) -> None:
     async def performance_stats(
         days: int = 7,
         engine: SemanticSearchEngine = Depends(get_engine),
-        _: None = Depends(_public_cache_headers),
+        _: None = Depends(public_cache_headers),
     ) -> dict:
         """Get search latency percentiles (p50, p90, p95, p99)."""
 

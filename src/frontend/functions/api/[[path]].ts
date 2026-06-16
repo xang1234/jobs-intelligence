@@ -41,9 +41,15 @@ export const onRequest: PagesFunction<Env> = async (context) => {
   // origin Space receives the correct Host regardless of the inbound one.
   const response = await fetch(new Request(upstreamUrl, request))
 
+  // Only cache what the origin explicitly marked shareable. Endpoints that omit
+  // a public Cache-Control (e.g. per-scenario career-delta detail) must not be
+  // edge-cached, so we never fall back to the CDN's heuristic caching.
   if (cacheable && response.ok) {
-    // Cache API honors the origin's Cache-Control (s-maxage) for the TTL.
-    context.waitUntil(cache.put(request, response.clone()))
+    const cc = response.headers.get('Cache-Control') ?? ''
+    const shareable = /\bs-maxage\b|\bpublic\b/.test(cc) && !/\bno-store\b|\bprivate\b/.test(cc)
+    if (shareable) {
+      context.waitUntil(cache.put(request, response.clone()))
+    }
   }
   return response
 }

@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
 from cachetools import TTLCache
+from fastapi import Response
 from pydantic import BaseModel
 
 from ..mcf.embeddings import SemanticSearchEngine
@@ -16,8 +17,26 @@ from ..mcf.embeddings import SemanticSearchEngine
 PUBLIC_RESPONSE_CACHE_TTL_SECONDS = 300
 PUBLIC_RESPONSE_CACHE_MAX_ENTRIES = 256
 
+# Public read endpoints return data that is identical for every user and only
+# changes when the nightly refresh runs, so they are safe to cache at the CDN
+# edge. s-maxage lets Cloudflare serve repeat hits from its Singapore edge with
+# zero round-trip to the US-hosted backend; stale-while-revalidate hides the
+# background refresh so users never block on a cold recompute.
+PUBLIC_CACHE_CONTROL = "public, s-maxage=600, stale-while-revalidate=86400"
+
 T = TypeVar("T")
 logger = logging.getLogger(__name__)
+
+
+def public_cache_headers(response: Response) -> None:
+    """FastAPI route dependency: mark a public read response as edge-cacheable.
+
+    Cloudflare honors the s-maxage directive and caches the response at the
+    edge, so repeat visitors are served locally without hitting the backend.
+    Used by the read-only GET endpoints that also go through
+    ``cached_public_response``.
+    """
+    response.headers["Cache-Control"] = PUBLIC_CACHE_CONTROL
 
 
 def _get_public_response_cache(engine: SemanticSearchEngine) -> TTLCache:
