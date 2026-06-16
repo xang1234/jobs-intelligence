@@ -157,6 +157,38 @@ This is a scheduled batch refresh, not a daemon:
 - hosted scrape state can resume between workflow runs
 - the current year and retention cutoff are computed dynamically
 
+### Manual Hosted Deploy
+
+Use [hosted-deploy.yml](../.github/workflows/hosted-deploy.yml) when you want
+to deploy the latest `master` branch to both Neon and the Hugging Face Space
+from the GitHub Actions UI. It is intentionally manual-only and does not run on
+merge.
+
+Required GitHub Actions secrets:
+
+```text
+NEON_DATABASE_URL
+HF_TOKEN
+```
+
+Optional GitHub Actions variables:
+
+```text
+HF_SPACE_REPO_ID=xang1234/jobs-intelligence-api
+HF_SOURCE_REPO=https://github.com/xang1234/jobs-intelligence.git
+HF_CORS_ORIGINS=https://jobs-intelligence.pages.dev,https://jobs.deepgradient.uk,https://deepgradient.uk,http://localhost:3000
+```
+
+Run it from GitHub:
+
+1. Open **Actions**.
+2. Select **Manual Hosted Deploy**.
+3. Choose the `master` branch in the workflow branch selector.
+4. Click **Run workflow**.
+
+The manual workflow can refresh/purge Neon first, then deploy the Hugging Face
+Space with `SOURCE_REF=master` and `SOURCE_VERSION=<workflow commit SHA>`.
+
 ## 5. API Hosting Option A: Hugging Face Spaces
 
 Use Hugging Face Spaces when Oracle Free Tier capacity is unavailable, when you
