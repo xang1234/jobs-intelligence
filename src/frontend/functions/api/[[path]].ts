@@ -23,6 +23,11 @@ interface Env {
 
 const DEFAULT_ORIGIN = 'https://xang1234-jobs-intelligence-api.hf.space'
 
+// Cap how long we wait on the origin. A down/hung Space then yields a clean 502
+// instead of a ~30s hang. Generous enough for the slowest warm endpoints
+// (match / career-delta), since the goal is to catch true hangs, not slow work.
+const UPSTREAM_TIMEOUT_MS = 20_000
+
 export const onRequest: PagesFunction<Env> = async (context) => {
   const { request, env } = context
   const origin = (env.API_ORIGIN ?? DEFAULT_ORIGIN).replace(/\/+$/, '')
@@ -32,6 +37,10 @@ export const onRequest: PagesFunction<Env> = async (context) => {
   const cacheable = request.method === 'GET'
   const cache = caches.default
 
+  // The Workers Cache API honors s-maxage for storage TTL but does NOT implement
+  // stale-while-revalidate: once an entry expires, this match misses and the
+  // fetch below revalidates synchronously against the (kept-warm) origin. The
+  // swr directive on the response is still honored by browser caches.
   if (cacheable) {
     const hit = await cache.match(request)
     if (hit) return hit
@@ -39,7 +48,18 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
   // The runtime routes the outbound fetch by the target URL's host, so the
   // origin Space receives the correct Host regardless of the inbound one.
-  const response = await fetch(new Request(upstreamUrl, request))
+  let response: Response
+  try {
+    response = await fetch(new Request(upstreamUrl, request), {
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+    })
+  } catch (err) {
+    const detail = err instanceof Error && err.name === 'TimeoutError' ? 'timeout' : 'unreachable'
+    return new Response(JSON.stringify({ error: 'upstream_unavailable', detail }), {
+      status: 502,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
 
   // Only cache what the origin explicitly marked shareable. Endpoints that omit
   // a public Cache-Control (e.g. per-scenario career-delta detail) must not be
