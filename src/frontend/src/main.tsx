@@ -55,9 +55,11 @@ const queryClient = new QueryClient({
   }),
 })
 
-// Persist only daily-stable PUBLIC read-only queries. Search ('search') and any
-// future user-specific keys are excluded so nothing personal lands in
-// localStorage. (Match Lab uses mutations and is never in the query cache.)
+// Canonical list of PUBLIC read-only query-key roots that are safe to persist to
+// localStorage. Allowlist (not denylist) on purpose: it fails safe — a query
+// that's missing here simply isn't persisted, it can never leak. Search
+// ('search') and any future user-specific keys are excluded; Match Lab uses
+// mutations and is never in the query cache. Add new public read-only roots here.
 const PERSIST_ALLOWLIST = new Set([
   'stats', 'skillCloud', 'overview', 'popularQueries', 'performanceStats',
   'skillTrends', 'roleTrend', 'companyTrend', 'similarCompanies', 'relatedSkills', 'health',
@@ -80,7 +82,8 @@ createRoot(document.getElementById('root')!).render(
           dehydrateOptions: {
             shouldDehydrateQuery: (query) =>
               query.state.status === 'success' &&
-              PERSIST_ALLOWLIST.has(query.queryKey[0] as string),
+              typeof query.queryKey[0] === 'string' &&
+              PERSIST_ALLOWLIST.has(query.queryKey[0]),
           },
         }}
       >

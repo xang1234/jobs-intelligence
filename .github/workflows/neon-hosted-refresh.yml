@@ -185,7 +185,10 @@ jobs:
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add src/frontend/public/snapshots/*.json
             git commit -m "chore(ui): refresh aggregate snapshots"
-            git push
+            # Rebase onto any commits that landed during this long-running job so
+            # the push is fast-forward rather than silently rejected.
+            git pull --rebase origin "$GITHUB_REF_NAME"
+            git push origin "HEAD:$GITHUB_REF_NAME"
           else
             echo "No snapshot changes to commit."
           fi
