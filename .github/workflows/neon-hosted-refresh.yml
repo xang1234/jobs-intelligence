@@ -165,6 +165,31 @@ jobs:
           print(f"Verified hosted slice: {job_embeddings} job embeddings, retention window enforced")
           PY
 
+      - name: Build UI aggregate snapshots
+        env:
+          PYTHONPATH: .
+          DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          MCF_SEARCH_BACKEND: pgvector
+          MCF_LEAN_HOSTED: "1"
+          MCF_EMBEDDING_BACKEND: onnx
+          MCF_ONNX_MODEL_DIR: data/models/all-MiniLM-L6-v2-onnx
+        run: poetry run python scripts/build_aggregates.py
+
+      - name: Commit snapshots if changed
+        run: |
+          # No [skip ci] — Cloudflare Pages honors skip markers and would skip the
+          # rebuild we want. This push does not re-trigger this workflow (schedule/
+          # dispatch only). Pages production branch must be the branch this runs on.
+          if [ -n "$(git status --porcelain src/frontend/public/snapshots)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add src/frontend/public/snapshots/*.json
+            git commit -m "chore(ui): refresh aggregate snapshots"
+            git push
+          else
+            echo "No snapshot changes to commit."
+          fi
+
       - name: Report failure
         if: failure()
         run: |
