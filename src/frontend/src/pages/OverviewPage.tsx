@@ -5,6 +5,7 @@ import PageHero from '@/components/shell/PageHero'
 import { Card, Chip, EmptyState, Skeleton, SkeletonText } from '@/components/ui'
 import { useIdleEnabled } from '@/hooks/useIdleEnabled'
 import { getOverview, getPopularQueries } from '@/services/api'
+import { snapshotFirst } from '@/services/snapshots'
 import type { MomentumCard } from '@/types/api'
 
 function formatMoney(value: number | null): string {
@@ -14,7 +15,7 @@ function formatMoney(value: number | null): string {
 
 export default function OverviewPage() {
   const showSecondaryData = useIdleEnabled()
-  const overview = useQuery({ queryKey: ['overview', 3], queryFn: () => getOverview(3) })
+  const overview = useQuery({ queryKey: ['overview', 3], queryFn: snapshotFirst('overview', () => getOverview(3)) })
   const popular = useQuery({
     queryKey: ['popularQueries'],
     queryFn: () => getPopularQueries(30, 8),
