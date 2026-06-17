@@ -77,7 +77,7 @@ from .models import (
     StatsResponse,
     TrendPoint,
 )
-from .response_cache import cached_public_response
+from .response_cache import cached_public_response, install_cache_headers
 
 logger = logging.getLogger(__name__)
 
@@ -90,26 +90,6 @@ _search_engine: Optional[SemanticSearchEngine] = None
 _engine_executor = ThreadPoolExecutor(max_workers=1)
 MATCH_LAB_RESPONSE_CACHE_TTL_SECONDS = 300
 MATCH_LAB_RESPONSE_CACHE_MAX_ENTRIES = 128
-
-# Read-only GET endpoints whose payloads are daily-stable. They get HTTP
-# Cache-Control so browsers (and any honoring CDN) reuse them without a round
-# trip; max-age aligns with the 300s in-memory response cache, and
-# stale-while-revalidate lets returning users repaint instantly while a fresh
-# copy is fetched in the background.
-CACHEABLE_GET_PREFIXES: tuple[str, ...] = (
-    "/api/overview",
-    "/api/stats",
-    "/api/skills/cloud",
-    "/api/skills/related",
-    "/api/trends/companies",
-    "/api/analytics/popular",
-    "/api/analytics/performance",
-)
-PUBLIC_CACHE_CONTROL = "public, max-age=300, stale-while-revalidate=86400"
-
-
-def is_cacheable_get(method: str, path: str, status_code: int) -> bool:
-    return method == "GET" and status_code == 200 and path.startswith(CACHEABLE_GET_PREFIXES)
 
 
 class _CareerDeltaTaxonomyHelper:
@@ -498,14 +478,7 @@ def create_app(
     # 3. Request logging (sees everything)
     app.add_middleware(RequestLoggingMiddleware, trusted_proxies=trusted_proxies)
 
-    # 4. Cache-Control for read-only GETs (outermost — added last; sees the
-    #    final response so it can set headers after CORS/rate-limit run).
-    @app.middleware("http")
-    async def add_cache_headers(request: Request, call_next):
-        response = await call_next(request)
-        if is_cacheable_get(request.method, request.url.path, response.status_code):
-            response.headers["Cache-Control"] = PUBLIC_CACHE_CONTROL
-        return response
+    install_cache_headers(app)  # Cache-Control on read-only GETs; policy in response_cache.py
 
     _register_routes(app)
     _register_exception_handlers(app)

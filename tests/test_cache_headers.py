@@ -1,4 +1,4 @@
-from src.api.app import is_cacheable_get
+from src.api.response_cache import is_cacheable_get
 
 
 def test_cacheable_get_paths():

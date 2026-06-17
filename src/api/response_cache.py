@@ -9,12 +9,33 @@ from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
 from cachetools import TTLCache
+from fastapi import FastAPI, Request
 from pydantic import BaseModel
 
 from ..mcf.embeddings import SemanticSearchEngine
 
 PUBLIC_RESPONSE_CACHE_TTL_SECONDS = 300
 PUBLIC_RESPONSE_CACHE_MAX_ENTRIES = 256
+
+# Read-only GET endpoints whose payloads are daily-stable. They get an HTTP
+# Cache-Control header (browser/CDN reuse without a round trip). max-age aligns
+# with the in-memory response cache above; stale-while-revalidate lets returning
+# users repaint instantly while a fresh copy is fetched in the background.
+CACHEABLE_GET_PREFIXES: tuple[str, ...] = (
+    "/api/overview",
+    "/api/stats",
+    "/api/skills/cloud",
+    "/api/skills/related",
+    "/api/trends/companies",
+    "/api/analytics/popular",
+    "/api/analytics/performance",
+)
+PUBLIC_CACHE_CONTROL = "public, max-age=300, stale-while-revalidate=86400"
+
+
+def is_cacheable_get(method: str, path: str, status_code: int) -> bool:
+    """True for the read-only GET endpoints whose responses are safe to cache."""
+    return method == "GET" and status_code == 200 and path.startswith(CACHEABLE_GET_PREFIXES)
 
 T = TypeVar("T")
 logger = logging.getLogger(__name__)
@@ -86,3 +107,14 @@ async def cached_public_response(
     inflight[cache_key] = task
     task.add_done_callback(lambda done: _drop_inflight_when_done(inflight, cache_key, done))
     return _clone_cached_response(await asyncio.shield(task))
+
+
+def install_cache_headers(app: FastAPI) -> None:
+    """Register middleware that sets Cache-Control on cacheable read-only GETs."""
+
+    @app.middleware("http")
+    async def add_cache_headers(request: Request, call_next):
+        response = await call_next(request)
+        if is_cacheable_get(request.method, request.url.path, response.status_code):
+            response.headers["Cache-Control"] = PUBLIC_CACHE_CONTROL
+        return response
