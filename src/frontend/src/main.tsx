@@ -4,8 +4,9 @@ import {
   MutationCache,
   QueryCache,
   QueryClient,
-  QueryClientProvider,
 } from '@tanstack/react-query'
+import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client'
+import { createSyncStoragePersister } from '@tanstack/query-sync-storage-persister'
 import { BrowserRouter } from 'react-router-dom'
 import './index.css'
 import App from './App.tsx'
@@ -54,16 +55,41 @@ const queryClient = new QueryClient({
   }),
 })
 
+// Persist only daily-stable PUBLIC read-only queries. Search ('search') and any
+// future user-specific keys are excluded so nothing personal lands in
+// localStorage. (Match Lab uses mutations and is never in the query cache.)
+const PERSIST_ALLOWLIST = new Set([
+  'stats', 'skillCloud', 'overview', 'popularQueries', 'performanceStats',
+  'skillTrends', 'roleTrend', 'companyTrend', 'similarCompanies', 'relatedSkills', 'health',
+])
+
+const persister = createSyncStoragePersister({ storage: window.localStorage })
+
+// Bump when any persisted query's response SHAPE changes (invalidates old caches).
+const QUERY_CACHE_BUSTER = 'v1'
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
-      <QueryClientProvider client={queryClient}>
+      <PersistQueryClientProvider
+        client={queryClient}
+        persistOptions={{
+          persister,
+          maxAge: 24 * 60 * 60 * 1000,
+          buster: QUERY_CACHE_BUSTER,
+          dehydrateOptions: {
+            shouldDehydrateQuery: (query) =>
+              query.state.status === 'success' &&
+              PERSIST_ALLOWLIST.has(query.queryKey[0] as string),
+          },
+        }}
+      >
         <BrowserRouter>
           <ThemeProvider>
             <App />
           </ThemeProvider>
         </BrowserRouter>
-      </QueryClientProvider>
+      </PersistQueryClientProvider>
       <Toaster />
     </ErrorBoundary>
   </StrictMode>,
