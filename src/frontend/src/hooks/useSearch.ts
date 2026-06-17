@@ -8,6 +8,7 @@ import {
   getSkillCloud,
   getHealth,
 } from '@/services/api'
+import { snapshotFirst } from '@/services/snapshots'
 
 const emptyFilters: Filters = {
   salary_min: null,
@@ -39,7 +40,7 @@ export function useSearch() {
   // ── Skill cloud (loads once on mount) ──
   const skillCloud = useQuery({
     queryKey: ['skillCloud'],
-    queryFn: () => getSkillCloud(10, 80),
+    queryFn: snapshotFirst('skills_cloud', () => getSkillCloud(10, 80)),
     staleTime: 10 * 60 * 1000, // 10 minutes
   })
 

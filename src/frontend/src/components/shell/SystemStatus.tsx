@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
 import { getHealth, getPerformanceStats, getStats } from '@/services/api'
+import { snapshotFirst } from '@/services/snapshots'
 
 // Slim app-wide status line. This is where retrieval/index telemetry lives now —
 // out of the page heroes, where users were reading "p95 latency" instead of jobs.
 // Lazy-loaded by the shell so it stays out of the entry chunk (api.ts comes with it).
 export default function SystemStatus() {
-  const stats = useQuery({ queryKey: ['stats'], queryFn: getStats, staleTime: 5 * 60 * 1000 })
+  const stats = useQuery({ queryKey: ['stats'], queryFn: snapshotFirst('stats', getStats), staleTime: 5 * 60 * 1000 })
   const perf = useQuery({
     queryKey: ['performanceStats'],
     queryFn: () => getPerformanceStats(30),

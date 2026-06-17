@@ -1,6 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { scheduleIdleQueue } from '@/services/idle'
 import { loadRouteModule, ROUTE_WARMUP_ORDER } from '@/services/routeModules'
+import { snapshotFirst } from '@/services/snapshots'
 
 const TREND_PREFETCH = {
   skills: ['Customer Service', 'Microsoft Excel', 'Communication Skills'],
@@ -41,9 +42,9 @@ export function prefetchRouteData(queryClient: QueryClient, to: string): void {
       if (to === '/pulse') {
         void queryClient.prefetchQuery({
           queryKey: ['overview', 3],
-          queryFn: () => getOverview(3),
+          queryFn: snapshotFirst('overview', () => getOverview(3)),
         })
-        void queryClient.prefetchQuery({ queryKey: ['stats'], queryFn: getStats })
+        void queryClient.prefetchQuery({ queryKey: ['stats'], queryFn: snapshotFirst('stats', getStats) })
         void queryClient.prefetchQuery({
           queryKey: ['popularQueries'],
           queryFn: () => getPopularQueries(30, 8),
@@ -88,7 +89,7 @@ export function prefetchRouteData(queryClient: QueryClient, to: string): void {
       if (to === '/') {
         void queryClient.prefetchQuery({
           queryKey: ['skillCloud'],
-          queryFn: () => getSkillCloud(10, 80),
+          queryFn: snapshotFirst('skills_cloud', () => getSkillCloud(10, 80)),
           staleTime: 10 * 60 * 1000,
         })
         void queryClient.prefetchQuery({ queryKey: ['health'], queryFn: getHealth })
