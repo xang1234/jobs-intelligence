@@ -6,7 +6,10 @@
 
 export async function loadSnapshot<T>(name: string): Promise<T | null> {
   try {
-    const res = await fetch(`/snapshots/${name}.json`, { cache: 'force-cache' })
+    // 'no-cache' = always revalidate against Pages (cheap 304 when unchanged).
+    // The snapshot URL is stable but its content changes daily, so we must NOT
+    // hard-cache it in the browser.
+    const res = await fetch(`/snapshots/${name}.json`, { cache: 'no-cache' })
     if (!res.ok) return null
     return (await res.json()) as T
   } catch {
