@@ -85,17 +85,26 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          TAG="archive-$SCRAPE_YEAR"
+          # First run for the year (no release yet) dumps the whole table as a
+          # baseline, so rows that predate this scheme are archived before the
+          # purge can delete them; later runs export only this run's changes.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            export ARCHIVE_BASELINE=0
+          else
+            export ARCHIVE_BASELINE=1
+          fi
           poetry run python scripts/neon_chunk.py
           source chunk.env
           if [ "${CHUNK_ROWS:-0}" -eq 0 ]; then
-            echo "::notice::No jobs changed this run; nothing to publish."
+            echo "::notice::No rows to archive this run; nothing to publish."
             exit 0
           fi
-          TAG="archive-$SCRAPE_YEAR"
-          gh release view "$TAG" >/dev/null 2>&1 || \
+          if [ "$ARCHIVE_BASELINE" -eq 1 ]; then
             gh release create "$TAG" \
               --title "MCF archive $SCRAPE_YEAR" \
-              --notes "Daily JSONL chunks for $SCRAPE_YEAR. Each asset is labeled by date and the scrape watermark (current_seq); concatenate all assets to restore the full $SCRAPE_YEAR slice."
+              --notes "Restorable JSONL chunks for $SCRAPE_YEAR: one baseline dump plus per-run deltas, each labeled by run timestamp and scrape watermark (current_seq). Concatenate all assets and replay (idempotent upserts) to restore the full $SCRAPE_YEAR slice."
+          fi
           gh release upload "$TAG" "$CHUNK_FILE" --clobber
           {
             echo "## Neon chunk published"
