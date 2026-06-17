@@ -15,11 +15,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
-      contents: read
+      contents: write  # publish range-labeled chunks to a GitHub Release
     env:
       NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
       ONNX_MODEL_DIR: data/models/all-MiniLM-L6-v2-onnx
       SCRAPE_YEAR: ""
+      SCRAPE_BUDGET: "80m"  # per-run scrape time box; hitting it is success — resume tomorrow
     steps:
       - uses: actions/checkout@v4
 
@@ -65,10 +66,44 @@ jobs:
 
       - name: Scrape current year jobs into Neon
         run: |
-          poetry run python -m src.cli scrape-historical \
+          echo "RUN_START_EPOCH=$(date -u +%s)" >> "$GITHUB_ENV"
+          set +e
+          timeout "$SCRAPE_BUDGET" poetry run python -m src.cli scrape-historical \
             --year "$SCRAPE_YEAR" \
             --resume \
             --db "$NEON_DATABASE_URL"
+          code=$?
+          set -e
+          if [ "$code" -eq 124 ]; then
+            echo "::notice::Hit ${SCRAPE_BUDGET} scrape budget; chunk published, resuming tomorrow."
+          elif [ "$code" -ne 0 ]; then
+            echo "::error::Scrape failed (exit $code)."
+            exit "$code"
+          fi
+
+      - name: Publish range-labeled chunk to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          poetry run python scripts/neon_chunk.py
+          source chunk.env
+          if [ "${CHUNK_ROWS:-0}" -eq 0 ]; then
+            echo "::notice::No jobs changed this run; nothing to publish."
+            exit 0
+          fi
+          TAG="archive-$SCRAPE_YEAR"
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" \
+              --title "MCF archive $SCRAPE_YEAR" \
+              --notes "Daily JSONL chunks for $SCRAPE_YEAR. Each asset is labeled by date and the scrape watermark (current_seq); concatenate all assets to restore the full $SCRAPE_YEAR slice."
+          gh release upload "$TAG" "$CHUNK_FILE" --clobber
+          {
+            echo "## Neon chunk published"
+            echo ""
+            echo "- Asset: \`$CHUNK_FILE\`"
+            echo "- Rows: $CHUNK_ROWS"
+            echo "- Release: ${{ github.server_url }}/${{ github.repository }}/releases/tag/$TAG"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Sync hosted job embeddings
         run: |
