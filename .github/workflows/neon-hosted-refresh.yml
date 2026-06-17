@@ -86,10 +86,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="archive-$SCRAPE_YEAR"
-          # First run for the year (no release yet) dumps the whole table as a
-          # baseline, so rows that predate this scheme are archived before the
-          # purge can delete them; later runs export only this run's changes.
-          if gh release view "$TAG" >/dev/null 2>&1; then
+          # Baseline is "done" only once a baseline asset actually exists -- not
+          # merely once the release exists. create + upload are separate steps,
+          # so a failed upload could otherwise leave an empty release that masks
+          # a never-archived baseline and lets the purge delete preexisting rows.
+          # The first run dumps the whole table; later runs export only changes.
+          if gh release view "$TAG" --json assets --jq '.assets[].name' 2>/dev/null | grep -q -- '-baseline-'; then
             export ARCHIVE_BASELINE=0
           else
             export ARCHIVE_BASELINE=1
@@ -100,11 +102,10 @@ jobs:
             echo "::notice::No rows to archive this run; nothing to publish."
             exit 0
           fi
-          if [ "$ARCHIVE_BASELINE" -eq 1 ]; then
+          gh release view "$TAG" >/dev/null 2>&1 || \
             gh release create "$TAG" \
               --title "MCF archive $SCRAPE_YEAR" \
               --notes "Restorable JSONL chunks for $SCRAPE_YEAR: one baseline dump plus per-run deltas, each labeled by run timestamp and scrape watermark (current_seq). Concatenate all assets and replay (idempotent upserts) to restore the full $SCRAPE_YEAR slice."
-          fi
           gh release upload "$TAG" "$CHUNK_FILE" --clobber
           {
             echo "## Neon chunk published"
